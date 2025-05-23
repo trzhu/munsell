@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'OrbitControls';
 
+let isPaused = false;
+
 async function loadShader(url) {
     const response = await fetch(url);
     return await response.text();
@@ -14,6 +16,13 @@ camera.position.z = 5;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 document.getElementById('scene-container').appendChild(renderer.domElement);
+
+// buttons 
+const pauseButton = document.getElementById('Pause');
+pauseButton.addEventListener('click', () => {
+    isPaused = !isPaused;
+    pauseButton.textContent = isPaused ? 'Play' : 'Pause';
+});
 
 function resize() {
   const container = document.getElementById('scene-container');
@@ -45,12 +54,11 @@ scene.add(cube);
 // it rotat
 function animate() {
   requestAnimationFrame(animate);
-  cube.rotation.y += 0.005;
+  if (!isPaused) {
+    cube.rotation.y += 0.005;
+  }
   renderer.render(scene, camera);
 }
+
 animate();
 
-// Button
-document.getElementById('button').addEventListener('click', () => {
-  console.log("the button doesnt do anything");
-});
