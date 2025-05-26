@@ -15,7 +15,7 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 camera.position.z = 5;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-document.getElementById('scene-container').appendChild(renderer.domElement);
+document.getElementById('render-container').appendChild(renderer.domElement);
 
 // buttons 
 const pauseButton = document.getElementById('Pause');
@@ -25,7 +25,7 @@ pauseButton.addEventListener('click', () => {
 });
 
 function resize() {
-  const container = document.getElementById('scene-container');
+  const container = document.getElementById('render-container');
   const width = container.clientWidth;
   const height = container.clientHeight;
 
