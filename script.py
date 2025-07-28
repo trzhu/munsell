@@ -68,13 +68,27 @@ def process(df):
 
     return df
 
+    # Convert polar Hue/Chroma to X/Z, use Value as Y
+def to_3d_coordinates(df):
+    radians = np.deg2rad(df["HueNumber"])
+    df["X_3D"] = df["Chroma"] * np.cos(radians)
+    df["Y_3D"] = df["Value"]
+    df["Z_3D"] = df["Chroma"] * np.sin(radians)
+    return df
+
 def main():
     input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
     df_raw = load_munsell_dat(input_url)
+    
     df_processed = process(df_raw)
-
     df_processed.to_csv("munsell_parsed.csv", index=False)
     print(f"saved to munsell_parsed.csv")
+    
+    df_3d = to_3d_coordinates(df_processed)
+    df_3d.to_csv("munsell_3d.csv", index=False)
+    print(f"saved to munsell_3d.csv")
+    
+    
 
 if __name__ == "__main__":
     main()
