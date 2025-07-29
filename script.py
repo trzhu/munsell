@@ -1,9 +1,10 @@
 import pandas as pd
 import numpy as np
 import re, urllib.request
-from colour import xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, CCS_ILLUMINANTS
+from colour import xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY, CCS_ILLUMINANTS
 from itertools import pairwise
 
+# TODO compute a scaling factor that makes the Y axis perceptually uniform?
 Y_SCALE = 3
 
 def load_munsell_dat(url):
@@ -29,7 +30,7 @@ def load_munsell_dat(url):
     return pd.DataFrame(rows)
 
 # converts from munsell principal/adjacent hue system (RYGBP) to degrees
-def munsell_hue_to_number(hue_str):
+def munsell_hue_to_deg(hue_str):
     hue_match = re.match(r'(\d{1,2}(\.\d+)?)([A-Z]+)', hue_str.strip())
     if not hue_match:
         return None
@@ -42,7 +43,7 @@ def munsell_hue_to_number(hue_str):
     return 3.6 * (base_index * 10 + number) # range: 0–360
 
 def process(df):
-    df["HueNumber"] = df["Hue"].apply(munsell_hue_to_number)
+    df["HueDeg"] = df["Hue"].apply(munsell_hue_to_deg)
 
     # Convert xyY to XYZ
     xyY = df[["x", "y", "Y_lum"]].to_numpy()
@@ -69,13 +70,73 @@ def process(df):
     df["a*"] = Lab[:, 1]
     df["b*"] = Lab[:, 2]
     
-    # TODO ADD WHITE/BLACK AND GRAYSCALE VERTICES LOL
+    grayscale_points = []
 
+    # Grayscale for each Value plate
+    # computed by averaging luminosity in CIELAB
+    for value, slice_df in df.groupby("Value"):
+        avg_L = slice_df["L*"].mean()
+        gray_lab = np.array([[avg_L, 0, 0]])
+
+        gray_xyz = Lab_to_XYZ(gray_lab, illuminant=illuminant_C)
+        gray_rgb = np.clip(XYZ_to_sRGB(gray_xyz, illuminant=illuminant_C), 0, 1)
+        gray_xyY = XYZ_to_xyY(gray_xyz)
+
+        grayscale_points.append({
+            "Hue": "N",
+            "Value": value,
+            "Chroma": 0.0,
+            "x": gray_xyY[0, 0],
+            "y": gray_xyY[0, 1],
+            "Y_lum": gray_xyY[0, 2],
+            "X": gray_xyz[0, 0],
+            "Y": gray_xyz[0, 1],
+            "Z": gray_xyz[0, 2],
+            "R": gray_rgb[0, 0],
+            "G": gray_rgb[0, 1],
+            "B": gray_rgb[0, 2],
+            "L*": avg_L,
+            "a*": 0.0,
+            "b*": 0.0,
+            "HueDeg": 0,
+        })
+
+    # Add black with Value = 0 and white with Value = 10
+    for value, L in [(0.0, 0.0), (10.0, 100.0)]:
+        lab = np.array([[L, 0, 0]])
+
+        xyz = Lab_to_XYZ(lab, illuminant=illuminant_C)
+        rgb = np.clip(XYZ_to_sRGB(xyz, illuminant=illuminant_C), 0, 1)
+        xyY = XYZ_to_xyY(xyz)
+
+        grayscale_points.append({
+            "Hue": "N",
+            "Value": value,
+            "Chroma": 0.0,
+            "x": xyY[0, 0],
+            "y": xyY[0, 1],
+            "Y_lum": xyY[0, 2],
+            "X": xyz[0, 0],
+            "Y": xyz[0, 1],
+            "Z": xyz[0, 2],
+            "R": rgb[0, 0],
+            "G": rgb[0, 1],
+            "B": rgb[0, 2],
+            "L*": L,
+            "a*": 0.0,
+            "b*": 0.0,
+            "HueDeg": 0,
+        })
+
+    df = pd.concat([df, pd.DataFrame(grayscale_points)], ignore_index=True)
+    
+    
+    
     return df
 
 # Convert polar Hue/Chroma to X/Z, use Value as Y
 def to_3d_coordinates(df):
-    radians = np.deg2rad(df["HueNumber"])
+    radians = np.deg2rad(df["HueDeg"])
     df["X_3D"] = df["Chroma"] * np.cos(radians)
     df["Y_3D"] = df["Value"]
     df["Z_3D"] = df["Chroma"] * np.sin(radians)
@@ -89,10 +150,10 @@ def to_mesh(df_3d):
     # sort each slice by hue
     # only keep the highest chroma vertex of each slice
     for v in slices:
-        slices[v] = slices[v].sort_values("Chroma", ascending=False).drop_duplicates("HueNumber", keep="first")
-        slices[v] = slices[v].sort_values("HueNumber")
+        slices[v] = slices[v].sort_values("Chroma", ascending=False).drop_duplicates("HueDeg", keep="first")
+        slices[v] = slices[v].sort_values("HueDeg")
     
-    # should be 1-9
+    # 1-9 for munsell data, 0-10 including white and black
     values = sorted(slices.keys())
     
     vertices, faces = [], []
@@ -174,23 +235,22 @@ def main():
     df_raw = load_munsell_dat(input_url)
     
     df_processed = process(df_raw)
-    # df_processed.to_csv("munsell_parsed.csv", index=False)
-    # print(f"saved to munsell_parsed.csv")
+    df_processed.to_csv("munsell_parsed.csv", index=False)
+    print(f"saved to munsell_parsed.csv")
     
     df_3d = to_3d_coordinates(df_processed)
-    # df_3d.to_csv("munsell_3d.csv", index=False)
-    # print(f"saved to munsell_3d.csv")
+    df_3d.to_csv("munsell_3d.csv", index=False)
+    print(f"saved to munsell_3d.csv")
     
     # create a point cloud
     vertices = to_pointcloud(df_3d)
     write_ply(vertices, [], "munsell_pointcloud.ply")
-    print(":)")
     
     # create a "shell" mesh
     outer_vertices, faces = to_mesh(df_3d)
     write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
-    
+    print(":)")
     
 
 
