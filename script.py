@@ -147,9 +147,13 @@ def to_mesh(df_3d):
     # each entry of the dictionary is a df of all points with that Value
     # represents a horizontal "plate", which are stacked to form the space
     slices = dict(tuple(df_3d.groupby("Value")))
-    # sort each slice by hue
-    # only keep the highest chroma vertex of each slice
+    
     for v in slices:
+        # remove grayscale rows (Hue == "N") unless v == 0 or v == 10
+        if v not in (0.0, 10.0):
+            slices[v] = slices[v][slices[v]["Hue"] != "N"]
+        # sort each slice by hue
+        # only keep the highest chroma (outermost) vertex of each slice
         slices[v] = slices[v].sort_values("Chroma", ascending=False).drop_duplicates("HueDeg", keep="first")
         slices[v] = slices[v].sort_values("HueDeg")
     
@@ -159,8 +163,6 @@ def to_mesh(df_3d):
     vertices, faces = [], []
     index_map = {}
     global_index = 0
-    
-    
     
     # add all vertices to global vertices list
     for v in values:
@@ -179,13 +181,24 @@ def to_mesh(df_3d):
     for v1, v2 in pairwise(values):
         idx1 = index_map[v1]
         idx2 = index_map[v2]
-        N = min(len(idx1), len(idx2))
-
-        for i in range(N):
-            i_next = (i + 1) % N
-            # form two triangles (that make 1 quad)
-            faces.append((idx1[i], idx2[i], idx2[i_next]))
-            faces.append((idx1[i], idx2[i_next], idx1[i_next]))
+        
+        if len(idx1) == 1:  # bottom cap (black)
+            center = idx1[0]
+            for i in range(len(idx2)):
+                i_next = (i + 1) % len(idx2)
+                faces.append((center, idx2[i], idx2[i_next]))
+        elif len(idx2) == 1:  # top cap (white)
+            center = idx2[0]
+            for i in range(len(idx1)):
+                i_next = (i + 1) % len(idx1)
+                faces.append((center, idx1[i_next], idx1[i]))
+        else: 
+            N = min(len(idx1), len(idx2))
+            for i in range(N):
+                i_next = (i + 1) % N
+                # form two triangles (that make 1 quad)
+                faces.append((idx1[i], idx2[i], idx2[i_next]))
+                faces.append((idx1[i], idx2[i_next], idx1[i_next]))
     
     return vertices, faces
 
