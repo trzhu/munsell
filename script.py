@@ -4,6 +4,8 @@ import re, urllib.request
 from colour import xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, CCS_ILLUMINANTS
 from itertools import pairwise
 
+Y_SCALE = 3
+
 def load_munsell_dat(url):
     rows = []
 
@@ -50,6 +52,7 @@ def process(df):
     illuminant_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
     sRGB = XYZ_to_sRGB(XYZ, illuminant=illuminant_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
+    # TODO: IF CLIPPED I NEED TO NOTE THAT
 
     # Convert to Lab
     Lab = XYZ_to_Lab(XYZ, illuminant=illuminant_C)
@@ -65,10 +68,12 @@ def process(df):
     df["L*"] = Lab[:, 0]
     df["a*"] = Lab[:, 1]
     df["b*"] = Lab[:, 2]
+    
+    # TODO ADD WHITE/BLACK AND GRAYSCALE VERTICES LOL
 
     return df
 
-    # Convert polar Hue/Chroma to X/Z, use Value as Y
+# Convert polar Hue/Chroma to X/Z, use Value as Y
 def to_3d_coordinates(df):
     radians = np.deg2rad(df["HueNumber"])
     df["X_3D"] = df["Chroma"] * np.cos(radians)
@@ -79,10 +84,12 @@ def to_3d_coordinates(df):
 # generate 3d mesh defined by the outermost vertices
 def to_mesh(df_3d):
     # each entry of the dictionary is a df of all points with that Value
-    # represents a horizontal slice of the space 
+    # represents a horizontal "plate", which are stacked to form the space
     slices = dict(tuple(df_3d.groupby("Value")))
     # sort each slice by hue
+    # only keep the highest chroma vertex of each slice
     for v in slices:
+        slices[v] = slices[v].sort_values("Chroma", ascending=False).drop_duplicates("HueNumber", keep="first")
         slices[v] = slices[v].sort_values("HueNumber")
     
     # should be 1-9
@@ -92,12 +99,16 @@ def to_mesh(df_3d):
     index_map = {}
     global_index = 0
     
+    
+    
     # add all vertices to global vertices list
     for v in values:
         slice_df = slices[v]
         idx_list = []
         for _, row in slice_df.iterrows():
-            vertices.append((row["X_3D"], row["Y_3D"], row["Z_3D"]))
+        # TODO: calculate the necessary scaling factor along Y axis 
+        # that makes it look perceptually uniform
+            vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], row["R"], row["G"], row["B"]))
             idx_list.append(global_index)
             global_index += 1
         # and index them (will automatically go in by hue order)
@@ -117,6 +128,15 @@ def to_mesh(df_3d):
     
     return vertices, faces
 
+# put all vertices in a point cloud
+def to_pointcloud(df_3d):
+    vertices = []
+    for _, row in df_3d.iterrows():
+        x, y, z = row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"]
+        r, g, b = row["R"], row["G"], row["B"]
+        vertices.append((x, y, z, r, g, b))
+    return vertices
+
 def write_obj(vertices, faces, filename="munsell_mesh.obj"):
     with open(filename, "w") as f:
         for v in vertices:
@@ -124,6 +144,30 @@ def write_obj(vertices, faces, filename="munsell_mesh.obj"):
         for face in faces:
             # obj format uses 1-based indexing
             f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\n")
+
+def write_ply(vertices, faces, filename):
+    with open(filename, "w") as f:
+        f.write("ply\n")
+        f.write("format ascii 1.0\n")
+        f.write(f"element vertex {len(vertices)}\n")
+        f.write("property float x\n")
+        f.write("property float y\n")
+        f.write("property float z\n")
+        f.write("property uchar red\n")
+        f.write("property uchar green\n")
+        f.write("property uchar blue\n")
+        f.write(f"element face {len(faces)}\n")
+        f.write("property list uchar int vertex_indices\n")
+        f.write("end_header\n")
+
+        for x, y, z, r, g, b in vertices:
+            r_byte = int(r * 255)
+            g_byte = int(g * 255)
+            b_byte = int(b * 255)
+            f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte}\n")
+
+        for face in faces:
+            f.write(f"3 {' '.join(map(str, face))}\n")
 
 def main():
     input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
@@ -137,11 +181,18 @@ def main():
     # df_3d.to_csv("munsell_3d.csv", index=False)
     # print(f"saved to munsell_3d.csv")
     
-    vertices, faces = to_mesh(df_3d)
-    write_obj(vertices, faces)
+    # create a point cloud
+    vertices = to_pointcloud(df_3d)
+    write_ply(vertices, [], "munsell_pointcloud.ply")
     print(":)")
     
+    # create a "shell" mesh
+    outer_vertices, faces = to_mesh(df_3d)
+    write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
+    
+    
+
 
 if __name__ == "__main__":
     main()
