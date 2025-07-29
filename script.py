@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
+import re, urllib.request
 from colour import xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, CCS_ILLUMINANTS
-import re
-import urllib.request
+from itertools import pairwise
 
 def load_munsell_dat(url):
     rows = []
@@ -26,7 +26,7 @@ def load_munsell_dat(url):
 
     return pd.DataFrame(rows)
 
-# converts from munsell principal/adjacent hue system (RYGBP) to a number 0–100
+# converts from munsell principal/adjacent hue system (RYGBP) to degrees
 def munsell_hue_to_number(hue_str):
     hue_match = re.match(r'(\d{1,2}(\.\d+)?)([A-Z]+)', hue_str.strip())
     if not hue_match:
@@ -37,7 +37,7 @@ def munsell_hue_to_number(hue_str):
     hue_order = ['R', 'YR', 'Y', 'GY', 'G', 'BG', 'B', 'PB', 'P', 'RP']
     base_index = hue_order.index(letter)
 
-    return (base_index * 10 + number)  # range: 0–100
+    return 3.6 * (base_index * 10 + number) # range: 0–360
 
 def process(df):
     df["HueNumber"] = df["Hue"].apply(munsell_hue_to_number)
@@ -76,17 +76,70 @@ def to_3d_coordinates(df):
     df["Z_3D"] = df["Chroma"] * np.sin(radians)
     return df
 
+# generate 3d mesh defined by the outermost vertices
+def to_mesh(df_3d):
+    # each entry of the dictionary is a df of all points with that Value
+    # represents a horizontal slice of the space 
+    slices = dict(tuple(df_3d.groupby("Value")))
+    # sort each slice by hue
+    for v in slices:
+        slices[v] = slices[v].sort_values("HueNumber")
+    
+    # should be 1-9
+    values = sorted(slices.keys())
+    
+    vertices, faces = [], []
+    index_map = {}
+    global_index = 0
+    
+    # add all vertices to global vertices list
+    for v in values:
+        slice_df = slices[v]
+        idx_list = []
+        for _, row in slice_df.iterrows():
+            vertices.append((row["X_3D"], row["Y_3D"], row["Z_3D"]))
+            idx_list.append(global_index)
+            global_index += 1
+        # and index them (will automatically go in by hue order)
+        index_map[v] = idx_list
+
+    # build faces between adjacent slices
+    for v1, v2 in pairwise(values):
+        idx1 = index_map[v1]
+        idx2 = index_map[v2]
+        N = min(len(idx1), len(idx2))
+
+        for i in range(N):
+            i_next = (i + 1) % N
+            # form two triangles (that make 1 quad)
+            faces.append((idx1[i], idx2[i], idx2[i_next]))
+            faces.append((idx1[i], idx2[i_next], idx1[i_next]))
+    
+    return vertices, faces
+
+def write_obj(vertices, faces, filename="munsell_mesh.obj"):
+    with open(filename, "w") as f:
+        for v in vertices:
+            f.write(f"v {v[0]} {v[1]} {v[2]}\n")
+        for face in faces:
+            # obj format uses 1-based indexing
+            f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\n")
+
 def main():
     input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
     df_raw = load_munsell_dat(input_url)
     
     df_processed = process(df_raw)
-    df_processed.to_csv("munsell_parsed.csv", index=False)
-    print(f"saved to munsell_parsed.csv")
+    # df_processed.to_csv("munsell_parsed.csv", index=False)
+    # print(f"saved to munsell_parsed.csv")
     
     df_3d = to_3d_coordinates(df_processed)
-    df_3d.to_csv("munsell_3d.csv", index=False)
-    print(f"saved to munsell_3d.csv")
+    # df_3d.to_csv("munsell_3d.csv", index=False)
+    # print(f"saved to munsell_3d.csv")
+    
+    vertices, faces = to_mesh(df_3d)
+    write_obj(vertices, faces)
+    print(":)")
     
     
 
