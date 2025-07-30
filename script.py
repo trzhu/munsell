@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
 import re, urllib.request
-from colour import xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
+from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY, xy_to_XYZ
 from colour.adaptation import chromatic_adaptation_VonKries
-from colour.models import CCS_ILLUMINANTS
 from itertools import pairwise
 
 # TODO compute a scaling factor that makes the Y axis perceptually uniform?
@@ -49,10 +48,12 @@ def process(df):
 
     # munsell used illuminant_C
     illuminant_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
-    
-    # TODO: need to adapt to illuminant D65 actually or it's not gonna work
-    # Convert xyY to XYZ
+        
+    # munsell's data was recorded as xyY_lum, but Y_lum is scaled from 0-100 instead of 0-1
     xyY = df[["x", "y", "Y_lum"]].to_numpy()
+    xyY[:, 2] /= 100  
+    
+    # Convert xyY to XYZ
     XYZ = xyY_to_XYZ(xyY)
 
     sRGB = XYZ_to_sRGB(XYZ, illuminant=illuminant_C)
@@ -243,7 +244,6 @@ def write_ply(vertices, faces, filename):
             g_byte = int(g * 255)
             b_byte = int(b * 255)
             f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte}\n")
-            # print(min(r_byte, g_byte, b_byte), max(r_byte, g_byte, b_byte))
 
         for face in faces:
             f.write(f"3 {' '.join(map(str, face))}\n")
