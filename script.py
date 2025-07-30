@@ -1,7 +1,9 @@
 import pandas as pd
 import numpy as np
 import re, urllib.request
-from colour import xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY, CCS_ILLUMINANTS
+from colour import xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
+from colour.adaptation import chromatic_adaptation_VonKries
+from colour.models import CCS_ILLUMINANTS
 from itertools import pairwise
 
 # TODO compute a scaling factor that makes the Y axis perceptually uniform?
@@ -45,12 +47,14 @@ def munsell_hue_to_deg(hue_str):
 def process(df):
     df["HueDeg"] = df["Hue"].apply(munsell_hue_to_deg)
 
+    # munsell used illuminant_C
+    illuminant_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
+    
+    # TODO: need to adapt to illuminant D65 actually or it's not gonna work
     # Convert xyY to XYZ
     xyY = df[["x", "y", "Y_lum"]].to_numpy()
     XYZ = xyY_to_XYZ(xyY)
 
-    # Convert to sRGB (illuminant C used in renotation data)
-    illuminant_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
     sRGB = XYZ_to_sRGB(XYZ, illuminant=illuminant_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
     # TODO: IF CLIPPED I NEED TO NOTE THAT
@@ -169,12 +173,10 @@ def to_mesh(df_3d):
         slice_df = slices[v]
         idx_list = []
         for _, row in slice_df.iterrows():
-        # TODO: calculate the necessary scaling factor along Y axis 
-        # that makes it look perceptually uniform
             vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], row["R"], row["G"], row["B"]))
             idx_list.append(global_index)
             global_index += 1
-        # and index them (will automatically go in by hue order)
+        # and index them (they will automatically go in by hue order)
         index_map[v] = idx_list
 
     # build faces between adjacent slices
@@ -182,12 +184,14 @@ def to_mesh(df_3d):
         idx1 = index_map[v1]
         idx2 = index_map[v2]
         
-        if len(idx1) == 1:  # bottom cap (black)
+        # bottom cap (black)
+        if len(idx1) == 1:
             center = idx1[0]
             for i in range(len(idx2)):
                 i_next = (i + 1) % len(idx2)
                 faces.append((center, idx2[i], idx2[i_next]))
-        elif len(idx2) == 1:  # top cap (white)
+        # top cap (white)
+        elif len(idx2) == 1:
             center = idx2[0]
             for i in range(len(idx1)):
                 i_next = (i + 1) % len(idx1)
@@ -239,6 +243,7 @@ def write_ply(vertices, faces, filename):
             g_byte = int(g * 255)
             b_byte = int(b * 255)
             f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte}\n")
+            # print(min(r_byte, g_byte, b_byte), max(r_byte, g_byte, b_byte))
 
         for face in faces:
             f.write(f"3 {' '.join(map(str, face))}\n")
@@ -249,11 +254,11 @@ def main():
     
     df_processed = process(df_raw)
     df_processed.to_csv("munsell_parsed.csv", index=False)
-    print(f"saved to munsell_parsed.csv")
+    print("saved to munsell_parsed.csv")
     
     df_3d = to_3d_coordinates(df_processed)
     df_3d.to_csv("munsell_3d.csv", index=False)
-    print(f"saved to munsell_3d.csv")
+    print("saved to munsell_3d.csv")
     
     # create a point cloud
     vertices = to_pointcloud(df_3d)
