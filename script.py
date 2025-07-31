@@ -45,6 +45,16 @@ def munsell_hue_to_deg(hue_str):
 
     return 3.6 * (base_index * 10 + number) # range: 0–360
 
+# Lab to XYZ to RGB
+def Lab_to_sRGB(lab):
+    xyz = Lab_to_XYZ(lab, illuminant=ILLUM_C)
+    sRGB = XYZ_to_sRGB(xyz, illuminant=ILLUM_C)
+    sRGB_clipped = np.clip(sRGB, 0, 1)
+    isClipped = sRGB == sRGB
+    
+    return sRGB_clipped, isClipped
+
+
 def process(df):
     df["HueDeg"] = df["Hue"].apply(munsell_hue_to_deg)
         
@@ -53,18 +63,18 @@ def process(df):
     xyY[:, 2] /= 100  
     
     # Convert xyY to XYZ
-    XYZ = xyY_to_XYZ(xyY)
+    xyz = xyY_to_XYZ(xyY)
 
-    sRGB = XYZ_to_sRGB(XYZ, illuminant=ILLUM_C)
+    sRGB = XYZ_to_sRGB(xyz, illuminant=ILLUM_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
     # TODO: IF CLIPPED should I write store that at the vertex or something?
 
     # Convert to Lab
-    Lab = XYZ_to_Lab(XYZ, illuminant=ILLUM_C)
+    Lab = XYZ_to_Lab(xyz, illuminant=ILLUM_C)
 
-    df["X"] = XYZ[:, 0]
-    df["Y"] = XYZ[:, 1]
-    df["Z"] = XYZ[:, 2]
+    df["X"] = xyz[:, 0]
+    df["Y"] = xyz[:, 1]
+    df["Z"] = xyz[:, 2]
 
     df["R"] = sRGB_clipped[:, 0]
     df["G"] = sRGB_clipped[:, 1]
@@ -213,26 +223,19 @@ def to_mesh(df_3d):
 #   11 value steps (inclusive of white and black)
 #   38 maximum chroma
 # target: 
-#   70+ hue steps
+#   80+ hue steps
 #   20-30+ value steps
 #   30+ chroma steps
-def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=2):
+def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
     """
-    Interpolates extra points between existing Munsell data points.
-
-    Parameters
-    ----------
-    df : DataFrame
-        Processed dataframe with HueDeg, Value, Chroma, L*, a*, b*, R,G,B
-    steps_hue : int
+    hue_steps : int
         Number of subdivisions between adjacent hue samples (of the same value and chroma)
-    steps_value : int
+    value_steps : int
         Number of subdivisions between adjacent Value layers
-    steps_chroma : int
-        Number of subdivisions between adjacent Chroma levels (for same hue and value)
+    chroma_steps : int
+        Number of subdivisions between adjacent Chroma shells (of the same hue and value)
 
     Returns
-    -------
     DataFrame
         Combined dataframe with original and interpolated points, 
         with `is_original` flag.
@@ -255,20 +258,28 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=2):
     all_points = []
     
     # interpolate radially along Chroma axis
+    # splits the df into buckets that have the same value and huedeg
+    # so we can interpolate between chroma
     for (val, hue), group in df.groupby(["Value", "HueDeg"]):
         group = group.sort_values("Chroma")
-        chroma_pts = group[["Chroma", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
+        chroma_pts = group[["Chroma", "L*", "a*", "b*"]].to_numpy()
         for i in range(len(chroma_pts) - 1):
             p1 = chroma_pts[i]
             p2 = chroma_pts[i+1]
-            for t in np.linspace(0, 1, steps_chroma+2)[1:-1]:
-                interp = (1-t)*p1 + t*p2
+            for t in np.linspace(0, 1, chroma_steps+2)[1:-1]:
+                # interpolate in Lab, then convert lab to rgb
+                lerp = (1-t)*p1 + t*p2
+                chroma, L, a, b = lerp
+                
+                Lab = np.array([[L, a, b]])
+                sRGB, isClipped = Lab_to_sRGB(Lab)
+                
                 all_points.append({
                     "HueDeg": hue,
                     "Value": val,
-                    "Chroma": interp[0],
-                    "L*": interp[1], "a*": interp[2], "b*": interp[3],
-                    "R": interp[4], "G": interp[5], "B": interp[6],
+                    "Chroma": chroma,
+                    "L*": L, "a*": a, "b*": b,
+                    "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
                     "is_original": False
                 })
     
@@ -282,6 +293,9 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=2):
     # so like u are interpolating between 2 vertically aligned spokes at any time
     # if two layers have a different amount of vertices, the interpolated layer should have their avg
     # TODO
+    for (chroma, hue), group in df.groupby(["Chroma", "HueDeg"]):
+        group = group.sort_values("Value")
+        value_pts = group[["Value", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
 
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
     all_points = []
