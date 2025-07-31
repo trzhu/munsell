@@ -1,12 +1,14 @@
 import pandas as pd
 import numpy as np
 import re, urllib.request
-from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY, xy_to_XYZ
-from colour.adaptation import chromatic_adaptation_VonKries
+from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
+from scipy.interpolate import griddata
 
 # TODO compute a scaling factor that makes the Y axis perceptually uniform?
 Y_SCALE = 3
+# munsell used illuminant C for his work
+ILLUM_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
 
 def load_munsell_dat(url):
     rows = []
@@ -45,9 +47,6 @@ def munsell_hue_to_deg(hue_str):
 
 def process(df):
     df["HueDeg"] = df["Hue"].apply(munsell_hue_to_deg)
-
-    # munsell used illuminant_C
-    illuminant_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
         
     # munsell's data was recorded as xyY_lum, but Y_lum is scaled from 0-100 instead of 0-1
     xyY = df[["x", "y", "Y_lum"]].to_numpy()
@@ -56,12 +55,12 @@ def process(df):
     # Convert xyY to XYZ
     XYZ = xyY_to_XYZ(xyY)
 
-    sRGB = XYZ_to_sRGB(XYZ, illuminant=illuminant_C)
+    sRGB = XYZ_to_sRGB(XYZ, illuminant=ILLUM_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
-    # TODO: IF CLIPPED I NEED TO NOTE THAT
+    # TODO: IF CLIPPED should I write store that at the vertex or something?
 
     # Convert to Lab
-    Lab = XYZ_to_Lab(XYZ, illuminant=illuminant_C)
+    Lab = XYZ_to_Lab(XYZ, illuminant=ILLUM_C)
 
     df["X"] = XYZ[:, 0]
     df["Y"] = XYZ[:, 1]
@@ -83,8 +82,8 @@ def process(df):
         avg_L = slice_df["L*"].mean()
         gray_lab = np.array([[avg_L, 0, 0]])
 
-        gray_xyz = Lab_to_XYZ(gray_lab, illuminant=illuminant_C)
-        gray_rgb = np.clip(XYZ_to_sRGB(gray_xyz, illuminant=illuminant_C), 0, 1)
+        gray_xyz = Lab_to_XYZ(gray_lab, illuminant=ILLUM_C)
+        gray_rgb = np.clip(XYZ_to_sRGB(gray_xyz, illuminant=ILLUM_C), 0, 1)
         gray_xyY = XYZ_to_xyY(gray_xyz)
 
         grayscale_points.append({
@@ -110,8 +109,8 @@ def process(df):
     for value, L in [(0.0, 0.0), (10.0, 100.0)]:
         lab = np.array([[L, 0, 0]])
 
-        xyz = Lab_to_XYZ(lab, illuminant=illuminant_C)
-        rgb = np.clip(XYZ_to_sRGB(xyz, illuminant=illuminant_C), 0, 1)
+        xyz = Lab_to_XYZ(lab, illuminant=ILLUM_C)
+        rgb = np.clip(XYZ_to_sRGB(xyz, illuminant=ILLUM_C), 0, 1)
         xyY = XYZ_to_xyY(xyz)
 
         grayscale_points.append({
@@ -207,6 +206,109 @@ def to_mesh(df_3d):
     
     return vertices, faces
 
+# Interpolates the Munsell renotation dataset along each of Hue, Value, Chroma
+# perform the interpolation in CIELAB.
+# original data set has: 
+#   10 hue steps
+#   11 value steps (inclusive of white and black)
+#   28 maximum chroma
+# target: 
+#   70+ hue steps
+#   20-30+ value steps
+#   20-30+ chroma steps
+def interpolate_between_points(df, steps_hue=8, steps_value=2, steps_chroma=1):
+    """
+    Interpolates extra points between existing Munsell data points.
+    Works slice-by-slice (Hue/Chroma ring), between Value slices, and radially in Chroma.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Processed dataframe with HueDeg, Value, Chroma, L*, a*, b*, R,G,B
+    steps_hue : int
+        Number of subdivisions between adjacent hue samples in a slice
+    steps_value : int
+        Number of subdivisions between adjacent Value slices
+    steps_chroma : int
+        Number of subdivisions between adjacent Chroma levels for same Hue/Value
+
+    Returns
+    -------
+    DataFrame
+        Combined dataframe with original and interpolated points, 
+        with `is_original` flag.
+    """
+    all_points = []
+    df = df.copy()
+    df["is_original"] = True
+
+    # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
+    for val, slice_df in df.groupby("Value"):
+        slice_df = slice_df.sort_values("HueDeg")
+        pts = slice_df[["HueDeg", "Chroma", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
+
+        for i in range(len(pts)):
+            p1 = pts[i]
+            p2 = pts[(i+1) % len(pts)]  # wrap around
+            for t in np.linspace(0, 1, steps_hue+2)[1:-1]:  # skip endpoints
+                interp = (1-t)*p1 + t*p2
+                all_points.append({
+                    "HueDeg": interp[0],
+                    "Value": val,
+                    "Chroma": interp[1],
+                    "L*": interp[2], "a*": interp[3], "b*": interp[4],
+                    "R": interp[5], "G": interp[6], "B": interp[7],
+                    "is_original": False
+                })
+
+    # interpolate vertically, between Value "plates"
+    values = sorted(df["Value"].unique())
+    for v1, v2 in zip(values[:-1], values[1:]):
+        slice1 = df[df["Value"] == v1].sort_values("HueDeg").reset_index(drop=True)
+        slice2 = df[df["Value"] == v2].sort_values("HueDeg").reset_index(drop=True)
+        N = min(len(slice1), len(slice2))
+
+        for i in range(N):
+            p1 = slice1.iloc[i]
+            p2 = slice2.iloc[i]
+            for t in np.linspace(0, 1, steps_value+2)[1:-1]:
+                interp = (1-t)*p1[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy() \
+                         + t*p2[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy()
+                all_points.append({
+                    "HueDeg": interp[0],
+                    "Value": (1-t)*p1["Value"] + t*p2["Value"],
+                    "Chroma": interp[1],
+                    "L*": interp[2], "a*": interp[3], "b*": interp[4],
+                    "R": interp[5], "G": interp[6], "B": interp[7],
+                    "is_original": False
+                })
+
+    # interpolate radially along Chroma axis
+    for (val, hue), group in df.groupby(["Value", "HueDeg"]):
+        group = group.sort_values("Chroma")
+        chroma_pts = group[["Chroma", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
+
+        for i in range(len(chroma_pts) - 1):
+            p1 = chroma_pts[i]
+            p2 = chroma_pts[i+1]
+            for t in np.linspace(0, 1, steps_chroma+2)[1:-1]:
+                interp = (1-t)*p1 + t*p2
+                all_points.append({
+                    "HueDeg": hue,
+                    "Value": val,
+                    "Chroma": interp[0],
+                    "L*": interp[1], "a*": interp[2], "b*": interp[3],
+                    "R": interp[4], "G": interp[5], "B": interp[6],
+                    "is_original": False
+                })
+
+    # Combine everything
+    df_interp = pd.DataFrame(all_points)
+    df_all = pd.concat([df, df_interp], ignore_index=True)
+
+    return df_all
+
+
 # put all vertices in a point cloud
 def to_pointcloud(df_3d):
     vertices = []
@@ -256,17 +358,21 @@ def main():
     df_processed.to_csv("munsell_parsed.csv", index=False)
     print("saved to munsell_parsed.csv")
     
-    df_3d = to_3d_coordinates(df_processed)
-    df_3d.to_csv("munsell_3d.csv", index=False)
-    print("saved to munsell_3d.csv")
+    df_interpolated = interpolate(df_processed)
+    df_interpolated.to_csv("munsell_interpolated.csv", index=False)
+    print("saved to munsell_interpolated.csv")
     
-    # create a point cloud
-    vertices = to_pointcloud(df_3d)
-    write_ply(vertices, [], "munsell_pointcloud.ply")
+    # df_3d = to_3d_coordinates(df_interpolated)
+    # df_3d.to_csv("munsell_3d.csv", index=False)
+    # print("saved to munsell_3d.csv")
     
-    # create a "shell" mesh
-    outer_vertices, faces = to_mesh(df_3d)
-    write_ply(outer_vertices, faces, "munsell_mesh.ply")
+    # # create a point cloud
+    # vertices = to_pointcloud(df_3d)
+    # write_ply(vertices, [], "munsell_pointcloud.ply")
+    
+    # # create a "shell" mesh
+    # outer_vertices, faces = to_mesh(df_3d)
+    # write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
     print(":)")
     
