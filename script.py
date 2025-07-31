@@ -238,10 +238,10 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
         Combined dataframe with original and interpolated points, 
         with `is_original` flag.
     """
-    all_points = []
     df = df.copy()
     df["is_original"] = True
-
+    all_points = []
+    
     # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
     for val, slice_df in df.groupby("Value"):
         slice_df = slice_df.sort_values("HueDeg")
@@ -260,7 +260,10 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
                     "R": interp[5], "G": interp[6], "B": interp[7],
                     "is_original": False
                 })
-
+    
+    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
+    all_points = []
+    
     # interpolate vertically, between Value "plates"
     values = sorted(df["Value"].unique())
     for v1, v2 in zip(values[:-1], values[1:]):
@@ -283,6 +286,9 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
                     "is_original": False
                 })
 
+    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
+    all_points = []
+
     # interpolate radially along Chroma axis
     for (val, hue), group in df.groupby(["Value", "HueDeg"]):
         group = group.sort_values("Chroma")
@@ -302,11 +308,9 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
                     "is_original": False
                 })
 
-    # Combine everything
-    df_interp = pd.DataFrame(all_points)
-    df_all = pd.concat([df, df_interp], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
 
-    return df_all
+    return df
 
 
 # put all vertices in a point cloud
