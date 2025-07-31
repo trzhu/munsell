@@ -287,15 +287,29 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
     all_points = []
     
     # interpolate vertically, between Value "plates"
-    # za plan:
-    # do each spoke one at a time
-    # work from the inside out - interpret between value = 0, then value = 1, etc
-    # so like u are interpolating between 2 vertically aligned spokes at any time
-    # if two layers have a different amount of vertices, the interpolated layer should have their avg
-    # TODO
+    # TODO: if two layers have a different amount of vertices, the interpolated layer should have their avg
+    # rn this just takes takes their minimum
     for (chroma, hue), group in df.groupby(["Chroma", "HueDeg"]):
         group = group.sort_values("Value")
-        value_pts = group[["Value", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
+        value_pts = group[["Value", "L*", "a*", "b*"]].to_numpy()
+        for i in range(len(value_pts) - 1):
+            p1 = value_pts[i]
+            p2 = value_pts[i+1]
+            for t in np.linspace(0, 1, hue_steps+2)[1:-1]:
+                lerp = (1-t)*p1 + t*p2
+                value, L, a, b = lerp
+                
+                Lab = np.array([[L, a, b]])
+                sRGB, isClipped = Lab_to_sRGB(Lab)
+                
+                all_points.append({
+                    "HueDeg": hue,
+                    "Value": value,
+                    "Chroma": chroma,
+                    "L*": L, "a*": a, "b*": b,
+                    "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
+                    "is_original": False
+                })
 
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
     all_points = []
