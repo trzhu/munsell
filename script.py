@@ -211,7 +211,7 @@ def to_mesh(df_3d):
 # original data set has: 
 #   10 hue steps
 #   11 value steps (inclusive of white and black)
-#   28 maximum chroma
+#   38 maximum chroma
 # target: 
 #   70+ hue steps
 #   20-30+ value steps
@@ -242,58 +242,10 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
     df["is_original"] = True
     all_points = []
     
-    # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
-    for val, slice_df in df.groupby("Value"):
-        slice_df = slice_df.sort_values("HueDeg")
-        pts = slice_df[["HueDeg", "Chroma", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
-
-        for i in range(len(pts)):
-            p1 = pts[i]
-            p2 = pts[(i+1) % len(pts)]  # wrap around
-            for t in np.linspace(0, 1, steps_hue+2)[1:-1]:  # skip endpoints
-                interp = (1-t)*p1 + t*p2
-                all_points.append({
-                    "HueDeg": interp[0],
-                    "Value": val,
-                    "Chroma": interp[1],
-                    "L*": interp[2], "a*": interp[3], "b*": interp[4],
-                    "R": interp[5], "G": interp[6], "B": interp[7],
-                    "is_original": False
-                })
-    
-    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
-    all_points = []
-    
-    # interpolate vertically, between Value "plates"
-    values = sorted(df["Value"].unique())
-    for v1, v2 in zip(values[:-1], values[1:]):
-        slice1 = df[df["Value"] == v1].sort_values("HueDeg").reset_index(drop=True)
-        slice2 = df[df["Value"] == v2].sort_values("HueDeg").reset_index(drop=True)
-        N = min(len(slice1), len(slice2))
-
-        for i in range(N):
-            p1 = slice1.iloc[i]
-            p2 = slice2.iloc[i]
-            for t in np.linspace(0, 1, steps_value+2)[1:-1]:
-                interp = (1-t)*p1[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy() \
-                         + t*p2[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy()
-                all_points.append({
-                    "HueDeg": interp[0],
-                    "Value": (1-t)*p1["Value"] + t*p2["Value"],
-                    "Chroma": interp[1],
-                    "L*": interp[2], "a*": interp[3], "b*": interp[4],
-                    "R": interp[5], "G": interp[6], "B": interp[7],
-                    "is_original": False
-                })
-
-    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
-    all_points = []
-
     # interpolate radially along Chroma axis
     for (val, hue), group in df.groupby(["Value", "HueDeg"]):
         group = group.sort_values("Chroma")
         chroma_pts = group[["Chroma", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
-
         for i in range(len(chroma_pts) - 1):
             p1 = chroma_pts[i]
             p2 = chroma_pts[i+1]
@@ -307,11 +259,60 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
                     "R": interp[4], "G": interp[5], "B": interp[6],
                     "is_original": False
                 })
-
+    
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
+    # all_points = []
+    
+    # # interpolate vertically, between Value "plates"
+    # # TODO this is horrid too
+    # values = sorted(df["Value"].unique())
+    # for v1, v2 in zip(values[:-1], values[1:]):
+    #     slice1 = df[df["Value"] == v1].sort_values("HueDeg").reset_index(drop=True)
+    #     slice2 = df[df["Value"] == v2].sort_values("HueDeg").reset_index(drop=True)
+    #     N = min(len(slice1), len(slice2))
+
+    #     for i in range(N):
+    #         p1 = slice1.iloc[i]
+    #         p2 = slice2.iloc[i]
+    #         for t in np.linspace(0, 1, steps_value+2)[1:-1]:
+    #             interp = (1-t)*p1[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy() \
+    #                      + t*p2[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy()
+    #             all_points.append({
+    #                 "HueDeg": interp[0],
+    #                 "Value": (1-t)*p1["Value"] + t*p2["Value"],
+    #                 "Chroma": interp[1],
+    #                 "L*": interp[2], "a*": interp[3], "b*": interp[4],
+    #                 "R": interp[5], "G": interp[6], "B": interp[7],
+    #                 "is_original": False
+    #             })
+
+    # df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
+    # all_points = []
+    
+    # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
+    # TODO: this doesnt work
+    # um maybe we need to work from inside to outside?
+    # for val, slice_df in df.groupby("Value"):  
+    #     slice_df = slice_df.sort_values("HueDeg")
+    #     pts = slice_df[["HueDeg", "Chroma", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
+
+    #     for i in range(len(pts)):
+    #         p1 = pts[i]
+    #         p2 = pts[(i+1) % len(pts)]  # wrap around
+    #         for t in np.linspace(0, 1, steps_hue+2)[1:-1]:  # skip endpoints
+    #             interp = (1-t)*p1 + t*p2
+    #             all_points.append({
+    #                 "HueDeg": interp[0],
+    #                 "Value": val,
+    #                 "Chroma": interp[1],
+    #                 "L*": interp[2], "a*": interp[3], "b*": interp[4],
+    #                 "R": interp[5], "G": interp[6], "B": interp[7],
+    #                 "is_original": False
+    #             })
+     
+    # df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
 
     return df
-
 
 # put all vertices in a point cloud
 def to_pointcloud(df_3d):
@@ -355,12 +356,14 @@ def write_ply(vertices, faces, filename):
             f.write(f"3 {' '.join(map(str, face))}\n")
 
 def main():
-    input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
-    df_raw = load_munsell_dat(input_url)
+    # input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
+    # df_raw = load_munsell_dat(input_url)
     
-    df_processed = process(df_raw)
-    df_processed.to_csv("munsell_parsed.csv", index=False)
-    print("saved to munsell_parsed.csv")
+    # df_processed = process(df_raw)
+    # df_processed.to_csv("munsell_parsed.csv", index=False)
+    # print("saved to munsell_parsed.csv")
+    
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     
     df_interpolated = interpolate(df_processed)
     df_interpolated.to_csv("munsell_interpolated.csv", index=False)
@@ -369,6 +372,8 @@ def main():
     df_3d = to_3d_coordinates(df_interpolated)
     df_3d.to_csv("munsell_3d.csv", index=False)
     print("saved to munsell_3d.csv")
+    
+    # df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
     
     # create a point cloud
     vertices = to_pointcloud(df_3d)
