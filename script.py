@@ -260,7 +260,7 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
     # interpolate radially along Chroma axis
     # splits the df into buckets that have the same value and huedeg
     # so we can interpolate between chroma
-    for (val, hue), group in df.groupby(["Value", "HueDeg"]):
+    for (value, hue), group in df.groupby(["Value", "HueDeg"]):
         group = group.sort_values("Chroma")
         chroma_pts = group[["Chroma", "L*", "a*", "b*"]].to_numpy()
         for i in range(len(chroma_pts) - 1):
@@ -276,7 +276,7 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                 
                 all_points.append({
                     "HueDeg": hue,
-                    "Value": val,
+                    "Value": value,
                     "Chroma": chroma,
                     "L*": L, "a*": a, "b*": b,
                     "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
@@ -295,7 +295,7 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
         for i in range(len(value_pts) - 1):
             p1 = value_pts[i]
             p2 = value_pts[i+1]
-            for t in np.linspace(0, 1, hue_steps+2)[1:-1]:
+            for t in np.linspace(0, 1, value_steps+2)[1:-1]:
                 lerp = (1-t)*p1 + t*p2
                 value, L, a, b = lerp
                 
@@ -320,7 +320,34 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
     # work from the inside out again
     # if two spokes are different lengths, the interpolated spoke should again have their avg
     # TODO
-     
+    for (value, chroma), group in df.groupby(["Value", "Chroma"]):
+        group = group.sort_values("HueDeg")
+        hue_pts = group[["HueDeg", "L*", "a*", "b*"]].to_numpy()
+        for i in range(len(hue_pts)):
+            p1 = hue_pts[i]
+            p2 = hue_pts[(i+1) % len(hue_pts)]
+            
+            for t in np.linspace(0, 1, hue_steps+2)[1:-1]:
+                lerp = (1-t)*p1 + t*p2
+                L, a, b = lerp[1:]
+                # handle the seam from 360 to 0
+                if i == len(hue_pts) - 1:
+                    hue = ((1-t)*p1[0] + t*(p2[0]+360)) % 360
+                else:
+                    hue = ((1-t)*p1[0] + t*p2[0]) % 360
+                
+                Lab = np.array([[L, a, b]])
+                sRGB, isClipped = Lab_to_sRGB(Lab)
+                
+                all_points.append({
+                    "HueDeg": hue,
+                    "Value": value,
+                    "Chroma": chroma,
+                    "L*": L, "a*": a, "b*": b,
+                    "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
+                    "is_original": False
+                })
+    
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
 
     return df
