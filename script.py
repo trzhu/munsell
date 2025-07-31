@@ -209,28 +209,27 @@ def to_mesh(df_3d):
 # Interpolates the Munsell renotation dataset along each of Hue, Value, Chroma
 # perform the interpolation in CIELAB.
 # original data set has: 
-#   10 hue steps
+#   40 hue steps
 #   11 value steps (inclusive of white and black)
 #   38 maximum chroma
 # target: 
 #   70+ hue steps
 #   20-30+ value steps
-#   20-30+ chroma steps
-def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
+#   30+ chroma steps
+def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=2):
     """
     Interpolates extra points between existing Munsell data points.
-    Works slice-by-slice (Hue/Chroma ring), between Value slices, and radially in Chroma.
 
     Parameters
     ----------
     df : DataFrame
         Processed dataframe with HueDeg, Value, Chroma, L*, a*, b*, R,G,B
     steps_hue : int
-        Number of subdivisions between adjacent hue samples in a slice
+        Number of subdivisions between adjacent hue samples (of the same value and chroma)
     steps_value : int
-        Number of subdivisions between adjacent Value slices
+        Number of subdivisions between adjacent Value layers
     steps_chroma : int
-        Number of subdivisions between adjacent Chroma levels for same Hue/Value
+        Number of subdivisions between adjacent Chroma levels (for same hue and value)
 
     Returns
     -------
@@ -240,6 +239,19 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
     """
     df = df.copy()
     df["is_original"] = True
+    
+    # this section duplicates grays so that each hue slice can have its own gray
+    # helps with radial interpolation
+    grays = df[df["Chroma"] == 0]
+    augmented = []
+
+    for _, gray in grays.iterrows():
+        for hue in df["HueDeg"].unique():
+            g = gray.copy()
+            g["HueDeg"] = hue
+            augmented.append(g)
+    df = pd.concat([df, pd.DataFrame(augmented)], ignore_index=True)
+    
     all_points = []
     
     # interpolate radially along Chroma axis
@@ -261,56 +273,27 @@ def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
                 })
     
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
-    # all_points = []
+    all_points = []
     
-    # # interpolate vertically, between Value "plates"
-    # # TODO this is horrid too
-    # values = sorted(df["Value"].unique())
-    # for v1, v2 in zip(values[:-1], values[1:]):
-    #     slice1 = df[df["Value"] == v1].sort_values("HueDeg").reset_index(drop=True)
-    #     slice2 = df[df["Value"] == v2].sort_values("HueDeg").reset_index(drop=True)
-    #     N = min(len(slice1), len(slice2))
+    # interpolate vertically, between Value "plates"
+    # za plan:
+    # do each spoke one at a time
+    # work from the inside out - interpret between value = 0, then value = 1, etc
+    # so like u are interpolating between 2 vertically aligned spokes at any time
+    # if two layers have a different amount of vertices, the interpolated layer should have their avg
+    # TODO
 
-    #     for i in range(N):
-    #         p1 = slice1.iloc[i]
-    #         p2 = slice2.iloc[i]
-    #         for t in np.linspace(0, 1, steps_value+2)[1:-1]:
-    #             interp = (1-t)*p1[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy() \
-    #                      + t*p2[["HueDeg","Chroma","L*","a*","b*","R","G","B"]].to_numpy()
-    #             all_points.append({
-    #                 "HueDeg": interp[0],
-    #                 "Value": (1-t)*p1["Value"] + t*p2["Value"],
-    #                 "Chroma": interp[1],
-    #                 "L*": interp[2], "a*": interp[3], "b*": interp[4],
-    #                 "R": interp[5], "G": interp[6], "B": interp[7],
-    #                 "is_original": False
-    #             })
-
-    # df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
-    # all_points = []
+    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
+    all_points = []
     
     # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
-    # TODO: this doesnt work
-    # um maybe we need to work from inside to outside?
-    # for val, slice_df in df.groupby("Value"):  
-    #     slice_df = slice_df.sort_values("HueDeg")
-    #     pts = slice_df[["HueDeg", "Chroma", "L*", "a*", "b*", "R", "G", "B"]].to_numpy()
-
-    #     for i in range(len(pts)):
-    #         p1 = pts[i]
-    #         p2 = pts[(i+1) % len(pts)]  # wrap around
-    #         for t in np.linspace(0, 1, steps_hue+2)[1:-1]:  # skip endpoints
-    #             interp = (1-t)*p1 + t*p2
-    #             all_points.append({
-    #                 "HueDeg": interp[0],
-    #                 "Value": val,
-    #                 "Chroma": interp[1],
-    #                 "L*": interp[2], "a*": interp[3], "b*": interp[4],
-    #                 "R": interp[5], "G": interp[6], "B": interp[7],
-    #                 "is_original": False
-    #             })
+    # za plan:
+    # do each spoke one at a time again, doing two neighbouring axles at a time
+    # work from the inside out again
+    # if two spokes are different lengths, the interpolated spoke should again have their avg
+    # TODO
      
-    # df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
 
     return df
 
