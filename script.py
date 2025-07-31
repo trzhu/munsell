@@ -216,7 +216,7 @@ def to_mesh(df_3d):
 #   70+ hue steps
 #   20-30+ value steps
 #   20-30+ chroma steps
-def interpolate_between_points(df, steps_hue=8, steps_value=2, steps_chroma=1):
+def interpolate(df, steps_hue=8, steps_value=2, steps_chroma=1):
     """
     Interpolates extra points between existing Munsell data points.
     Works slice-by-slice (Hue/Chroma ring), between Value slices, and radially in Chroma.
@@ -362,17 +362,17 @@ def main():
     df_interpolated.to_csv("munsell_interpolated.csv", index=False)
     print("saved to munsell_interpolated.csv")
     
-    # df_3d = to_3d_coordinates(df_interpolated)
-    # df_3d.to_csv("munsell_3d.csv", index=False)
-    # print("saved to munsell_3d.csv")
+    df_3d = to_3d_coordinates(df_interpolated)
+    df_3d.to_csv("munsell_3d.csv", index=False)
+    print("saved to munsell_3d.csv")
     
-    # # create a point cloud
-    # vertices = to_pointcloud(df_3d)
-    # write_ply(vertices, [], "munsell_pointcloud.ply")
+    # create a point cloud
+    vertices = to_pointcloud(df_3d)
+    write_ply(vertices, [], "munsell_pointcloud.ply")
     
-    # # create a "shell" mesh
-    # outer_vertices, faces = to_mesh(df_3d)
-    # write_ply(outer_vertices, faces, "munsell_mesh.ply")
+    # create a "shell" mesh
+    outer_vertices, faces = to_mesh(df_3d)
+    write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
     print(":)")
     
