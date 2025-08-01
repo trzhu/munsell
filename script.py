@@ -50,9 +50,9 @@ def Lab_to_sRGB(lab):
     xyz = Lab_to_XYZ(lab, illuminant=ILLUM_C)
     sRGB = XYZ_to_sRGB(xyz, illuminant=ILLUM_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
-    isClipped = sRGB == sRGB
+    is_clipped = (sRGB == sRGB_clipped)
     
-    return sRGB_clipped, isClipped
+    return sRGB_clipped, is_clipped
 
 
 def process(df):
@@ -67,7 +67,7 @@ def process(df):
 
     sRGB = XYZ_to_sRGB(xyz, illuminant=ILLUM_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
-    # TODO: IF CLIPPED should I write store that at the vertex or something?
+    is_clipped = True if sRGB == sRGB_clipped else False
 
     # Convert to Lab
     Lab = XYZ_to_Lab(xyz, illuminant=ILLUM_C)
@@ -83,6 +83,8 @@ def process(df):
     df["L*"] = Lab[:, 0]
     df["a*"] = Lab[:, 1]
     df["b*"] = Lab[:, 2]
+    
+    df["is_clipped"] = is_clipped
     
     grayscale_points = []
 
@@ -113,6 +115,7 @@ def process(df):
             "a*": 0.0,
             "b*": 0.0,
             "HueDeg": 0,
+            "is_clipped": False
         })
 
     # Add black with Value = 0 and white with Value = 10
@@ -140,6 +143,7 @@ def process(df):
             "a*": 0.0,
             "b*": 0.0,
             "HueDeg": 0,
+            "is_clipped": False
         })
 
     df = pd.concat([df, pd.DataFrame(grayscale_points)], ignore_index=True)
@@ -160,18 +164,24 @@ def to_3d_coordinates(df):
 def to_mesh(df_3d):
     # each entry of the dictionary is a df of all points with that Value
     # represents a horizontal "plate", which are stacked to form the space
-    slices = dict(tuple(df_3d.groupby("Value")))
-    
-    for v in slices:
-        # remove grayscale rows (Hue == "N") unless v == 0 or v == 10
+    slices = {}
+    for v, slice_df in df_3d.groupby("Value"):
+        
+        # remove grayscale (except black and white)
         if v not in (0.0, 10.0):
-            slices[v] = slices[v][slices[v]["Hue"] != "N"]
+            slice_df = slice_df[slice_df["Chroma"] > 0]
+
+        # skip slices that were interpolated to only have a singular grayscale point
+        if slice_df.empty:
+            continue
+        
         # sort each slice by hue
-        # only keep the highest chroma (outermost) vertex of each slice
-        slices[v] = slices[v].sort_values("Chroma", ascending=False).drop_duplicates("HueDeg", keep="first")
-        slices[v] = slices[v].sort_values("HueDeg")
+        # # only keep the highest chroma (outermost) vertex of each slice
+        slice_df = slice_df.sort_values("Chroma", ascending=False).drop_duplicates("HueDeg", keep="first")
+        slice_df = slice_df.sort_values("HueDeg")
+        slices[v] = slice_df
     
-    # 1-9 for munsell data, 0-10 including white and black
+    # originally 1-9 for munsell data, 0-10 including white and black
     values = sorted(slices.keys())
     
     vertices, faces = [], []
@@ -226,7 +236,7 @@ def to_mesh(df_3d):
 #   80+ hue steps
 #   20-30+ value steps
 #   30+ chroma steps
-def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
+def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
     """
     hue_steps : int
         Number of subdivisions between adjacent hue samples (of the same value and chroma)
@@ -272,7 +282,7 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                 chroma, L, a, b = lerp
                 
                 Lab = np.array([[L, a, b]])
-                sRGB, isClipped = Lab_to_sRGB(Lab)
+                sRGB, is_clipped = Lab_to_sRGB(Lab)
                 
                 all_points.append({
                     "HueDeg": hue,
@@ -280,7 +290,8 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                     "Chroma": chroma,
                     "L*": L, "a*": a, "b*": b,
                     "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
-                    "is_original": False
+                    "is_original": False,
+                    "is_clipped": is_clipped
                 })
     
     # drop the extra grayscales now that we're done with them
@@ -303,7 +314,7 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                 value, L, a, b = lerp
                 
                 Lab = np.array([[L, a, b]])
-                sRGB, isClipped = Lab_to_sRGB(Lab)
+                sRGB, is_clipped = Lab_to_sRGB(Lab)
                 
                 all_points.append({
                     "HueDeg": hue,
@@ -311,24 +322,19 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                     "Chroma": chroma,
                     "L*": L, "a*": a, "b*": b,
                     "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
-                    "is_original": False
+                    "is_original": False,
+                    "is_clipped": is_clipped
                 })
 
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
     all_points = []
     
     # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
-    # za plan:
-    # do each spoke one at a time again, doing two neighbouring axles at a time
-    # work from the inside out again
-    # if two spokes are different lengths, the interpolated spoke should again have their avg
-    # TODO
+    # TODO if two spokes are different lengths, the interpolated spoke should again have their avg
     for (value, chroma), group in df.groupby(["Value", "Chroma"]):
         
-        # skip grayscale
-        if chroma == 0:
-            continue
-        if len(group) < 2:
+        # skip grayscale or groups with only one vertex
+        if chroma == 0 or len(group) < 2: 
             continue
                 
         group = group.sort_values("HueDeg")
@@ -354,7 +360,7 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                     hue = ((1-t)*p1[0] + t*p2[0]) % 360
                 
                 Lab = np.array([[L, a, b]])
-                sRGB, isClipped = Lab_to_sRGB(Lab)
+                sRGB, is_clipped = Lab_to_sRGB(Lab)
                 
                 all_points.append({
                     "HueDeg": hue,
@@ -362,7 +368,8 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                     "Chroma": chroma,
                     "L*": L, "a*": a, "b*": b,
                     "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
-                    "is_original": False
+                    "is_original": False,
+                    "is_clipped": is_clipped,
                 })
     
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
