@@ -328,18 +328,20 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
         # skip grayscale
         if chroma == 0:
             continue
-        
+        if len(group) < 2:
+            continue
+                
         group = group.sort_values("HueDeg")
         hue_pts = group[["HueDeg", "L*", "a*", "b*"]].to_numpy()
+        
         for i in range(len(hue_pts)):
             p1 = hue_pts[i]
             p2 = hue_pts[(i+1) % len(hue_pts)]
             
-            # for now, truncate if they are different lengths
-            # IT STILL DOESNT WORK WHY ARE THEY STICKY OUTY
-            minlen = min(len(p1), len(p2))
-            p1 = p1[:minlen]
-            p2 = p2[:minlen]
+            # if angular difference between two spokes isn't 9.0, they aren't actually next to each other
+            hue_delta = (p2[0] - p1[0]) % 360
+            if hue_delta != 9.0:
+                continue
             
             for t in np.linspace(0, 1, hue_steps+2)[1:-1]:
                 lab_lerp = (1-t)*p1[1:] + t*p2[1:]
