@@ -283,6 +283,9 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
                     "is_original": False
                 })
     
+    # drop the extra grayscales now that we're done with them
+    df = df[~((df["Chroma"] == 0) & (df["HueDeg"] != 0))].reset_index(drop=True)
+    
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
     all_points = []
     
@@ -321,17 +324,29 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=2):
     # if two spokes are different lengths, the interpolated spoke should again have their avg
     # TODO
     for (value, chroma), group in df.groupby(["Value", "Chroma"]):
+        
+        # skip grayscale
+        if chroma == 0:
+            continue
+        
         group = group.sort_values("HueDeg")
         hue_pts = group[["HueDeg", "L*", "a*", "b*"]].to_numpy()
         for i in range(len(hue_pts)):
             p1 = hue_pts[i]
             p2 = hue_pts[(i+1) % len(hue_pts)]
             
+            # for now, truncate if they are different lengths
+            # IT STILL DOESNT WORK WHY ARE THEY STICKY OUTY
+            minlen = min(len(p1), len(p2))
+            p1 = p1[:minlen]
+            p2 = p2[:minlen]
+            
             for t in np.linspace(0, 1, hue_steps+2)[1:-1]:
-                lerp = (1-t)*p1 + t*p2
-                L, a, b = lerp[1:]
-                # handle the seam from 360 to 0
-                if i == len(hue_pts) - 1:
+                lab_lerp = (1-t)*p1[1:] + t*p2[1:]
+                L, a, b = lab_lerp
+                
+                # cant lerp HueDeg - handle the seam from 360 to 0
+                if i == len(hue_pts) - 1 or p2[0] < p1[0]:
                     hue = ((1-t)*p1[0] + t*(p2[0]+360)) % 360
                 else:
                     hue = ((1-t)*p1[0] + t*p2[0]) % 360
