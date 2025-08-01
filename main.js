@@ -35,7 +35,7 @@ resize();
 const light = new THREE.DirectionalLight(0xffffff, 5);
 light.position.set(5, 5, 5);
 scene.add(light);
-scene.add(new THREE.AmbientLight(0x404040));
+// scene.add(new THREE.AmbientLight(0x404040));
 
 // load PLY
 const loader = new PLYLoader();
@@ -53,7 +53,7 @@ loader.load('./munsell_mesh.ply', (geometry) => {
     vertexColors: geometry.hasAttribute('color')
   });
 
-  mesh = new THREE.Mesh(geometry, litMaterial);
+  mesh = new THREE.Mesh(geometry, unlitMaterial);
   scene.add(mesh);
 
   geometry.computeBoundingSphere();
@@ -71,7 +71,7 @@ pauseButton.addEventListener('click', () => {
 
 // add lighting toggle button
 const toggleLightButton = document.createElement('button');
-toggleLightButton.textContent = 'Show Exact Color';
+toggleLightButton.textContent = 'Turn on Lighting';
 toggleLightButton.style.width = '100%';
 document.getElementById('floating-ui').appendChild(toggleLightButton);
 
