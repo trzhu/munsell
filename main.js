@@ -10,14 +10,21 @@ let isPaused = false;
 let mesh = null; // reference to loaded mesh
 let litMaterial, unlitMaterial;
 
+// init scene + camera + lights
 function initScene() {
   // scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x7f7f7f);
 
-  // camera
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 0, 10);
+  // init camera
+  const container = document.getElementById('render-container');
+  const aspect = container.clientWidth / container.clientHeight;
+  // orthographic camera setup
+  // parameters dont matter bc we're gonna centre it to our mesh later anyways
+  camera = new THREE.OrthographicCamera(
+    -1 * aspect, 1 * aspect, 1, -1, 
+    0.1, 5000
+  );
 
   // renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -25,14 +32,12 @@ function initScene() {
 
   // controls
   controls = new OrbitControls(camera, renderer.domElement);
-}
 
-function initLights() {
-  // lights
-  const light = new THREE.DirectionalLight(0xffffff, 5);
+  // init lights
+  const light = new THREE.DirectionalLight(0xffffff, 3.5);
   light.position.set(5, 5, 5);
   scene.add(light);
-  scene.add(new THREE.AmbientLight(0x404040));
+  scene.add(new THREE.AmbientLight(0xeeeeee));
 }
 
 function initUI() {
@@ -94,32 +99,57 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
+// load mesh from PLY file
+function loadMesh() {
+  const loader = new PLYLoader();
+  loader.load('./munsell_mesh.ply', (geometry) => {
+    geometry.computeVertexNormals();
 
+    litMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      flatShading: false,
+      vertexColors: geometry.hasAttribute('color')
+    });
 
-// load PLY
-const loader = new PLYLoader();
-loader.load('./munsell_mesh.ply', (geometry) => {
-  geometry.computeVertexNormals();
+    unlitMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: geometry.hasAttribute('color')
+    });
 
-  litMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    flatShading: false,
-    vertexColors: geometry.hasAttribute('color')
-  });
+    mesh = new THREE.Mesh(geometry, unlitMaterial);
+    scene.add(mesh);
 
-  unlitMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    vertexColors: geometry.hasAttribute('color')
-  });
+    centerCamera(mesh);
+  }); 
+}
 
-  mesh = new THREE.Mesh(geometry, unlitMaterial);
-  scene.add(mesh);
+// fit camera to be aligned with/look at mesh
+function centerCamera(object, offset = 1) {
+  const box = new THREE.Box3().setFromObject(object);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
 
-  geometry.computeBoundingSphere();
-  if (geometry.boundingSphere) {
-    camera.position.z = geometry.boundingSphere.radius * 3;
-  }
-});
+  // move controls target to mesh center
+  controls.target.copy(center);
+
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
+
+  camera.left   = -maxDim * aspect * 0.5 * offset;
+  camera.right  =  maxDim * aspect * 0.5 * offset;
+  camera.top    =  maxDim * 0.5 * offset;
+  camera.bottom = -maxDim * 0.5 * offset;
+  camera.near = 0.001;
+  camera.far = 1000;
+  camera.updateProjectionMatrix();
+
+  camera.position.set(center.x, center.y, center.z + maxDim * offset);
+
+  camera.lookAt(center);
+}
+
 
 // animate
 function animate() {
@@ -129,12 +159,10 @@ function animate() {
   }
   renderer.render(scene, camera);
 }
-// animate();
-
 
 function main() {
   initScene();
-  initLights();
+  loadMesh();
   slicer = new Slicer();
   initUI();
   resize();
