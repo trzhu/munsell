@@ -94,6 +94,15 @@ class Slicer {
 function resize() {
   const container = document.getElementById('render-container');
   camera.aspect = container.clientWidth / container.clientHeight;
+  // Recompute orthographic frustum with current "zoom" size
+  const halfHeight = (camera.top - camera.bottom) / 2;
+  const halfWidth = halfHeight * camera.aspect;
+
+  camera.left   = -halfWidth;
+  camera.right  =  halfWidth;
+  camera.top    =  halfHeight;
+  camera.bottom = -halfHeight;
+
   camera.updateProjectionMatrix();
   renderer.setSize(container.clientWidth, container.clientHeight);
 }
@@ -124,7 +133,8 @@ function loadMesh() {
 }
 
 // fit camera to be aligned with/look at mesh
-function centerCamera(object, offset = 1) {
+// offset = leftwards offset of the mesh from the centre of the screen
+function centerCamera(object, scale = 1, offset = 0.167) {
   const box = new THREE.Box3().setFromObject(object);
   const size = new THREE.Vector3();
   const center = new THREE.Vector3();
@@ -136,18 +146,24 @@ function centerCamera(object, offset = 1) {
 
   const maxDim = Math.max(size.x, size.y, size.z);
   const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
+  // offset camera a bit so that 
+  const offsetX = offset * maxDim;
 
-  camera.left   = -maxDim * aspect * 0.5 * offset;
-  camera.right  =  maxDim * aspect * 0.5 * offset;
-  camera.top    =  maxDim * 0.5 * offset;
-  camera.bottom = -maxDim * 0.5 * offset;
-  camera.near = 0.001;
-  camera.far = 1000;
+  camera.left   = -maxDim * aspect * 0.5 / scale + offsetX;
+  camera.right  =  maxDim * aspect * 0.5 / scale + offsetX;
+  camera.top    =  maxDim * 0.5 / scale;
+  camera.bottom = -maxDim * 0.5 / scale;
+  camera.near   = -maxDim * 2;
+  camera.far    =  maxDim * 2;
   camera.updateProjectionMatrix();
-
-  camera.position.set(center.x, center.y, center.z + maxDim * offset);
+  
+  camera.position.set(center.x, center.y, center.z + maxDim / scale);
 
   camera.lookAt(center);
+  
+  // keep OrbitControls centred around the mesh
+  controls.target.copy(center);
+  controls.update();
 }
 
 
@@ -158,6 +174,9 @@ function animate() {
     mesh.rotation.y += 0.01;
   }
   renderer.render(scene, camera);
+
+  controls.target.copy(meshCenter);  // meshCenter is the bounding box center
+  controls.update();
 }
 
 function main() {
