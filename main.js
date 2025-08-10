@@ -98,12 +98,18 @@ function initUI() {
 // either that or I'll create faces for every fin
 class Slicer {
   constructor() {
+    // horizontal plane - cuts along value axis
     this.horizontal = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-    // radial plane (cuts around hue axis)
+    // radial planes (cut around hue axis)
     this.radial_lower = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
+    this.radial_upper = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
 
-    this.clippingPlanes = [this.horizontal, this.radial_lower];
+    // lower hue angle and hue span angle
+    this.baseHueAngle = 0;
+    this.hueSpan = 170;
+
+    this.clippingPlanes = [this.horizontal, this.radial_lower, this.radial_upper];
   }
 
   applyToMaterial(material) {
@@ -121,16 +127,38 @@ class Slicer {
 
   // radial (Hue)
   setHue(angleDeg) {
+    this.baseHueAngle = angleDeg;
     const theta = (angleDeg * Math.PI) / 180;
     this.radial_lower.normal.set(Math.cos(theta), 0, Math.sin(theta));
     this.radial_lower.constant = 0;
   }
+
+  setHueSpan(spanDegrees) {
+    this.hueSpan = spanDegrees;
+  }
+
 
   // chroma (radius cutoff) (needs shader OR bounding logic)
   setChroma(maxRadius) {
     this.maxRadius = maxRadius;
     // TODO LMAO IDK WHATS GOING ON HERE
   }
+
+  updateRadialPlaneRotation(meshRotationY) {
+  const baseAngle = (this.baseHueAngle * Math.PI / 180) + meshRotationY;
+  const halfSpan = (this.hueSpan * Math.PI / 180) / 2;
+  
+  // Lower bound of pie slice
+  this.radial_lower.normal.set(Math.cos(baseAngle - halfSpan), 0, Math.sin(baseAngle - halfSpan));
+  
+  // Upper bound of pie slice (note the flipped normal for intersection)
+  this.radial_upper.normal.set(-Math.cos(baseAngle + halfSpan), 0, -Math.sin(baseAngle + halfSpan));
+  }
+}
+
+// making this a helper bc later hue angle might not be 0-360
+function hueToRadians(hueAngle) {
+  return hueAngle * Math.PI / 180
 }
 
 // resize
@@ -152,6 +180,8 @@ function resize() {
 window.addEventListener("resize", resize);
 
 // load mesh from PLY file
+// TODO: this one loads the solid mesh 
+// later might load point cloud as well
 function loadMesh() {
   const loader = new PLYLoader();
   loader.load("./munsell_mesh.ply", (geometry) => {
@@ -218,6 +248,12 @@ function animate() {
   if (!isPaused && mesh) {
     mesh.rotation.y += 0.01;
   }
+
+  // Update radial plane to rotate with mesh
+  if (slicer) {
+    slicer.updateRadialPlaneRotation(-mesh.rotation.y);
+  }
+
   renderer.render(scene, camera);
 
   controls.update();
