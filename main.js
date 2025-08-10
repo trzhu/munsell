@@ -108,21 +108,15 @@ class Slicer {
 
   applyToMaterial(material) {
     material.clippingPlanes = this.clippingPlanes;
-    material.clipIntersection = true;
+    material.clipIntersection = false;
     material.needsUpdate = true;
   }
 
   // horizontal (Value)
   setValue(offset) {
-    // i think mesh height is like 10 or something idk
-    this.horizontal.constant = offset + 5;
-
-    if (litMaterial) {
-      litMaterial.needsUpdate = true;
-    }
-    if (unlitMaterial) {
-      unlitMaterial.needsUpdate = true;
-    }
+    // mesh height is 30
+    // need negative offset for it to work
+    this.horizontal.constant = -offset;
   }
 
   // radial (Hue)
@@ -130,13 +124,6 @@ class Slicer {
     const theta = (angleDeg * Math.PI) / 180;
     this.radial_lower.normal.set(Math.cos(theta), 0, Math.sin(theta));
     this.radial_lower.constant = 0;
-
-    if (litMaterial) {
-      litMaterial.needsUpdate = true;
-    }
-    if (unlitMaterial) {
-      unlitMaterial.needsUpdate = true;
-    }
   }
 
   // chroma (radius cutoff) (needs shader OR bounding logic)
@@ -172,15 +159,16 @@ function loadMesh() {
 
     litMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      clippingPlanes: slicer.clippingPlanes,
       clipIntersection: true,
     });
 
     unlitMaterial = new THREE.MeshBasicMaterial({
       vertexColors: true,
-      clippingPlanes: slicer.clippingPlanes,
       clipIntersection: true,
     });
+
+    slicer.applyToMaterial(litMaterial);
+    slicer.applyToMaterial(unlitMaterial);
 
     mesh = new THREE.Mesh(geometry, unlitMaterial);
     scene.add(mesh);
