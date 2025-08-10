@@ -109,7 +109,11 @@ class Slicer {
     this.baseHueAngle = 0;
     this.hueSpan = 170;
 
-    this.clippingPlanes = [this.horizontal, this.radial_lower, this.radial_upper];
+    this.clippingPlanes = [
+      this.horizontal,
+      this.radial_lower,
+      this.radial_upper,
+    ];
   }
 
   applyToMaterial(material) {
@@ -137,7 +141,6 @@ class Slicer {
     this.hueSpan = spanDegrees;
   }
 
-
   // chroma (radius cutoff) (needs shader OR bounding logic)
   setChroma(maxRadius) {
     this.maxRadius = maxRadius;
@@ -145,20 +148,160 @@ class Slicer {
   }
 
   updateRadialPlaneRotation(meshRotationY) {
-  const baseAngle = (this.baseHueAngle * Math.PI / 180) + meshRotationY;
-  const halfSpan = (this.hueSpan * Math.PI / 180) / 2;
-  
-  // Lower bound of pie slice
-  this.radial_lower.normal.set(Math.cos(baseAngle - halfSpan), 0, Math.sin(baseAngle - halfSpan));
-  
-  // Upper bound of pie slice (note the flipped normal for intersection)
-  this.radial_upper.normal.set(-Math.cos(baseAngle + halfSpan), 0, -Math.sin(baseAngle + halfSpan));
+    const baseAngle = (this.baseHueAngle * Math.PI) / 180 + meshRotationY;
+    const halfSpan = (this.hueSpan * Math.PI) / 180 / 2;
+
+    // Lower bound of pie slice
+    this.radial_lower.normal.set(
+      Math.cos(baseAngle - halfSpan),
+      0,
+      Math.sin(baseAngle - halfSpan)
+    );
+
+    // Upper bound of pie slice (note the flipped normal for intersection)
+    this.radial_upper.normal.set(
+      -Math.cos(baseAngle + halfSpan),
+      0,
+      -Math.sin(baseAngle + halfSpan)
+    );
+  }
+}
+
+class CircularHueSlider {
+  constructor(containerId) {
+    this.container = document.getElementById(containerId);
+    this.handle1 = document.getElementById("handle1");
+    this.handle2 = document.getElementById("handle2");
+    this.arcFill = document.getElementById("arc-fill");
+
+    this.centerX = 100;
+    this.centerY = 100;
+    this.radius = 90;
+
+    this.angle1 = 0;
+    this.angle2 = 60;
+
+    this.isDragging = false;
+    this.activeHandle = null;
+    this.onChange = null;
+
+    this.init();
+    this.updateDisplay();
+  }
+
+  init() {
+    this.handle1.addEventListener("mousedown", (e) =>
+      this.startDrag(e, "handle1")
+    );
+    this.handle2.addEventListener("mousedown", (e) =>
+      this.startDrag(e, "handle2")
+    );
+    document.addEventListener("mousemove", (e) => this.drag(e));
+    document.addEventListener("mouseup", () => this.endDrag());
+  }
+
+  startDrag(e, handleId) {
+    e.preventDefault();
+    this.isDragging = true;
+    this.activeHandle = handleId;
+
+    if (handleId === "handle1") {
+      this.handle1.classList.add("active");
+    } else {
+      this.handle2.classList.add("active");
+    }
+  }
+
+  drag(e) {
+    if (!this.isDragging || !this.activeHandle) return;
+
+    e.preventDefault();
+
+    const rect = this.container.getBoundingClientRect();
+    const x = e.clientX - rect.left - this.centerX;
+    const y = e.clientY - rect.top - this.centerY;
+
+    let angle = (Math.atan2(y, x) * 180) / Math.PI;
+    if (angle < 0) angle += 360;
+
+    if (this.activeHandle === "handle1") {
+      this.angle1 = angle;
+    } else {
+      this.angle2 = angle;
+    }
+
+    this.updateDisplay();
+    this.notifyChange();
+  }
+
+  endDrag() {
+    this.isDragging = false;
+    this.activeHandle = null;
+    this.handle1.classList.remove("active");
+    this.handle2.classList.remove("active");
+  }
+
+  updateDisplay() {
+    this.positionHandle(this.handle1, this.angle1);
+    this.positionHandle(this.handle2, this.angle2);
+    this.updateArcFill();
+  }
+
+  positionHandle(handle, angle) {
+    const radian = (angle * Math.PI) / 180;
+    const x = this.centerX + Math.cos(radian) * this.radius;
+    const y = this.centerY + Math.sin(radian) * this.radius;
+
+    handle.style.left = x + "px";
+    handle.style.top = y + "px";
+  }
+
+  updateArcFill() {
+    const centerX = 100;
+    const centerY = 100;
+    const radius = 90; // Same radius as the handles
+
+    // Convert angles to radians
+    const start = (this.angle1 * Math.PI) / 180;
+    const end = (this.angle2 * Math.PI) / 180;
+
+    // Calculate start and end points on the circle
+    const x1 = centerX + radius * Math.cos(start);
+    const y1 = centerY + radius * Math.sin(start);
+    const x2 = centerX + radius * Math.cos(end);
+    const y2 = centerY + radius * Math.sin(end);
+
+    // Calculate the arc span
+    let arcSpan = this.angle2 - this.angle1;
+    if (arcSpan < 0) arcSpan += 360; // Handle wraparound
+
+    // Determine if it's a large arc (>180 degrees)
+    const largeArc = arcSpan > 180 ? 1 : 0;
+
+    // Create the SVG arc path (always goes clockwise from handle1 to handle2)
+    const pathData = `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`;
+
+    document.getElementById("arc-path").setAttribute("d", pathData);
+  }
+
+  getHueRange() {
+    return {
+      start: this.angle1,
+      end: this.angle2,
+      wrapsAround: this.angle1 > this.angle2,
+    };
+  }
+
+  notifyChange() {
+    if (this.onChange) {
+      this.onChange(this.getHueRange());
+    }
   }
 }
 
 // making this a helper bc later hue angle might not be 0-360
 function hueToRadians(hueAngle) {
-  return hueAngle * Math.PI / 180
+  return (hueAngle * Math.PI) / 180;
 }
 
 // resize
@@ -180,7 +323,7 @@ function resize() {
 window.addEventListener("resize", resize);
 
 // load mesh from PLY file
-// TODO: this one loads the solid mesh 
+// TODO: this one loads the solid mesh
 // later might load point cloud as well
 function loadMesh() {
   const loader = new PLYLoader();
@@ -263,6 +406,13 @@ function main() {
   initScene();
   loadMesh();
   slicer = new Slicer();
+
+  // Initialize circular hue slider
+  const circularHueSlider = new CircularHueSlider("hue-slider");
+  circularHueSlider.onChange = (range) => {
+    console.log("Hue range:", range);
+    // Connect to your slicer here
+  };
   initUI();
   resize();
   animate();

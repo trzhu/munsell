@@ -64,6 +64,93 @@
         margin-bottom: 0.75rem;
       }
 
+      /* hue slider */
+      .circular-slider {
+        position: relative;
+        width: 200px;
+        height: 200px;
+        margin: 10px 0;
+      }
+
+      .slider-track {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        position: relative;
+        background: conic-gradient(
+          /* TODO: UPDATE TO USE MUNSELL'S HUE SPACING */
+          hsl(0, 100%, 50%),
+          hsl(60, 100%, 50%),
+          hsl(120, 100%, 50%),
+          hsl(180, 100%, 50%),
+          hsl(240, 100%, 50%),
+          hsl(300, 100%, 50%),
+          hsl(360, 100%, 50%)
+        );
+      }
+
+      .slider-track::after {
+        content: "";
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        right: 20px;
+        bottom: 20px;
+        background: #333;
+        border-radius: 50%;
+      }
+
+      .handle {
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        background: white;
+        border: 3px solid #333;
+        border-radius: 50%;
+        cursor: pointer;
+        transform: translate(-50%, -50%);
+        z-index: 10;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      }
+
+      .handle:hover {
+        transform: translate(-50%, -50%) scale(1.1);
+      }
+
+      .handle.active {
+        background: #4caf50;
+        transform: translate(-50%, -50%) scale(1.2);
+      }
+
+      .arc-indicator {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+
+      .arc-svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .arc-fill::after {
+        content: "";
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        right: 20px;
+        bottom: 20px;
+        background: #333;
+        border-radius: 50%;
+      }
+
       /* Bottom content pushes everything above */
       #bottom-half {
         padding: 3rem;
@@ -97,6 +184,27 @@
         <button id="toggle-rotation">Pause Rotation</button>
 
         <!-- collapsible HVC sliders -->
+
+        <details open>
+          <summary>new Hue slider</summary>
+
+          <div class="circular-slider" id="hue-slider">
+            <div class="slider-track"></div>
+            <div class="arc-indicator">
+              <svg class="arc-svg" width="200" height="200">
+                <path
+                  id="arc-path"
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.8)"
+                  stroke-width="3"
+                />
+              </svg>
+            </div>
+            <div class="handle" id="handle1"></div>
+            <div class="handle" id="handle2"></div>
+          </div>
+        </details>
+
         <details open>
           <summary>Hue</summary>
           <input id="hue-slider" type="range" min="0" max="360" value="0" />
