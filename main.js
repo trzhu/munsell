@@ -77,8 +77,10 @@ function initUI() {
   // Initialize circular hue slider
   const circularHueSlider = new CircularHueSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
-    console.log("Hue range:", range);
-    // Connect to your slicer here
+    // console.log("Hue range:", range);
+    if (slicer) {
+      slicer.setHueRange(range.start, range.end);
+    }
   };
 
   // Chroma slider
@@ -99,72 +101,88 @@ function initUI() {
 // either that or I'll create faces for every fin
 class Slicer {
   constructor() {
-    // horizontal plane - cuts along value axis
+    // Plane definitions
     this.horizontal = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-
-    // radial planes (cut around hue axis)
     this.radial_lower = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
     this.radial_upper = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
-
-    // lower hue angle and hue span angle
-    this.baseHueAngle = 0;
-    this.hueSpan = 170;
-
-    this.clippingPlanes = [
-      this.horizontal,
-      this.radial_lower,
-      this.radial_upper,
-    ];
+    
+    this.clippingPlanes = [this.horizontal, this.radial_lower, this.radial_upper];
+    
+    // State
+    this.hueStart = 0;
+    this.hueEnd = 60;
+    this.meshRotation = 0;
+    this.maxRadius = 1; // For chroma (not yet implemented)
   }
 
+  // ===== MATERIAL MANAGEMENT =====
   applyToMaterial(material) {
     material.clippingPlanes = this.clippingPlanes;
     material.clipIntersection = false;
     material.needsUpdate = true;
   }
 
-  // horizontal (Value)
+  updateMaterials() {
+    if (typeof litMaterial !== 'undefined' && litMaterial) {
+      litMaterial.needsUpdate = true;
+    }
+    if (typeof unlitMaterial !== 'undefined' && unlitMaterial) {
+      unlitMaterial.needsUpdate = true;
+    }
+  }
+
+  // helper in case i change hue to be on a diff scale than 0-360 later
+  hueToRadians(hueDegrees) {
+    return (hueDegrees * Math.PI) / 180;
+  }
+
+  // PUBLIC SETTERS
   setValue(offset) {
-    // mesh height is 30
-    // need negative offset for it to work
+    // Horizontal plane for value slicing (mesh height is 30)
     this.horizontal.constant = -offset;
+    this.updateMaterials();
   }
 
-  // radial (Hue)
-  setHue(angleDeg) {
-    this.baseHueAngle = angleDeg;
-    const theta = (angleDeg * Math.PI) / 180;
-    this.radial_lower.normal.set(Math.cos(theta), 0, Math.sin(theta));
-    this.radial_lower.constant = 0;
+  setHueRange(startAngle, endAngle) {
+    this.hueStart = startAngle;
+    this.hueEnd = endAngle;
+    this.updateRadialPlanes();
   }
 
-  setHueSpan(spanDegrees) {
-    this.hueSpan = spanDegrees;
-  }
-
-  // chroma (radius cutoff) (needs shader OR bounding logic)
   setChroma(maxRadius) {
     this.maxRadius = maxRadius;
-    // TODO LMAO IDK WHATS GOING ON HERE
+    // TODO idk how I'm gonna do chroma slicing lmao
   }
 
-  updateRadialPlaneRotation(meshRotationY) {
-    const baseAngle = (this.baseHueAngle * Math.PI) / 180 + meshRotationY;
-    const halfSpan = (this.hueSpan * Math.PI) / 180 / 2;
+  updateMeshRotation(meshRotationY) {
+    this.meshRotation = meshRotationY;
+    this.updateRadialPlanes();
+  }
 
-    // Lower bound of pie slice
+  // PRIVATE IMPLEMENTATION
+  updateRadialPlanes() {
+    // Convert hue angles to world space, including mesh rotation
+    const startRadians = this.hueToRadians(this.hueStart) + this.meshRotation;
+    const endRadians = this.hueToRadians(this.hueEnd) + this.meshRotation;
+
+    // Lower bound plane - clips everything "before" the start angle
     this.radial_lower.normal.set(
-      Math.cos(baseAngle - halfSpan),
-      0,
-      Math.sin(baseAngle - halfSpan)
+      Math.cos(startRadians), 
+      0, 
+      Math.sin(startRadians)
     );
+    this.radial_lower.constant = 0;
 
-    // Upper bound of pie slice (note the flipped normal for intersection)
+    // Upper bound plane - clips everything "after" the end angle
+    // Normal points inward to create the closing edge of the pie slice
     this.radial_upper.normal.set(
-      -Math.cos(baseAngle + halfSpan),
-      0,
-      -Math.sin(baseAngle + halfSpan)
+      -Math.cos(endRadians), 
+      0, 
+      -Math.sin(endRadians)
     );
+    this.radial_upper.constant = 0;
+
+    this.updateMaterials();
   }
 }
 
@@ -309,11 +327,6 @@ class CircularHueSlider {
   }
 }
 
-// making this a helper bc later hue angle might not be 0-360
-function hueToRadians(hueAngle) {
-  return (hueAngle * Math.PI) / 180;
-}
-
 // resize
 function resize() {
   const container = document.getElementById("render-container");
@@ -400,11 +413,7 @@ function animate() {
   requestAnimationFrame(animate);
   if (!isPaused && mesh) {
     mesh.rotation.y += 0.01;
-  }
-
-  // Update radial plane to rotate with mesh
-  if (slicer) {
-    slicer.updateRadialPlaneRotation(-mesh.rotation.y);
+    slicer.updateMeshRotation(-mesh.rotation.y);
   }
 
   renderer.render(scene, camera);
