@@ -78,8 +78,7 @@
         border-radius: 50%;
         position: relative;
         background: conic-gradient(
-          /* TODO: UPDATE TO USE MUNSELL'S HUE SPACING */
-          hsl(0, 100%, 50%),
+          /* TODO: UPDATE TO USE MUNSELL'S HUE SPACING */ hsl(0, 100%, 50%),
           hsl(60, 100%, 50%),
           hsl(120, 100%, 50%),
           hsl(180, 100%, 50%),
@@ -117,8 +116,9 @@
         transform: translate(-50%, -50%) scale(1.1);
       }
 
+      /* TODO: make this match the selected colour */
       .handle.active {
-        background: #4caf50;
+        background: #aaa;
         transform: translate(-50%, -50%) scale(1.2);
       }
 
@@ -184,30 +184,31 @@
         <button id="toggle-rotation">Pause Rotation</button>
 
         <!-- collapsible HVC sliders -->
-
         <details open>
-          <summary>new Hue slider</summary>
-
+          <summary>Hue</summary>
           <div class="circular-slider" id="hue-slider">
             <div class="slider-track"></div>
             <div class="arc-indicator">
               <svg class="arc-svg" width="200" height="200">
                 <path
-                  id="arc-path"
+                  id="arc-path-outer"
                   fill="none"
-                  stroke="rgba(255, 255, 255, 0.8)"
-                  stroke-width="3"
+                  stroke="white"
+                  stroke-width="4"
+                  stroke-linecap="round"
+                />
+                <path
+                  id="arc-path-inner"
+                  fill="none"
+                  stroke="white"
+                  stroke-width="4"
+                  stroke-linecap="round"
                 />
               </svg>
             </div>
             <div class="handle" id="handle1"></div>
             <div class="handle" id="handle2"></div>
           </div>
-        </details>
-
-        <details open>
-          <summary>Hue</summary>
-          <input id="hue-slider" type="range" min="0" max="360" value="0" />
         </details>
 
         <details open>

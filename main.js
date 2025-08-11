@@ -74,11 +74,12 @@ function initUI() {
     }
   });
 
-  // Hue slider
-  document.querySelector("#hue-slider").addEventListener("input", (e) => {
-    const val = parseFloat(e.target.value);
-    slicer.setHue(val);
-  });
+  // Initialize circular hue slider
+  const circularHueSlider = new CircularHueSlider("hue-slider");
+  circularHueSlider.onChange = (range) => {
+    console.log("Hue range:", range);
+    // Connect to your slicer here
+  };
 
   // Chroma slider
   document.querySelector("#chroma-slider").addEventListener("input", (e) => {
@@ -259,17 +260,24 @@ class CircularHueSlider {
   updateArcFill() {
     const centerX = 100;
     const centerY = 100;
-    const radius = 90; // Same radius as the handles
+    const inner_radius = 82; // Inner edge of the color wheel
+    const outer_radius = 98; // outer edge
 
     // Convert angles to radians
     const start = (this.angle1 * Math.PI) / 180;
     const end = (this.angle2 * Math.PI) / 180;
 
-    // Calculate start and end points on the circle
-    const x1 = centerX + radius * Math.cos(start);
-    const y1 = centerY + radius * Math.sin(start);
-    const x2 = centerX + radius * Math.cos(end);
-    const y2 = centerY + radius * Math.sin(end);
+    // Calculate start and end points on the inner circle
+    const x1_r = centerX + inner_radius * Math.cos(start);
+    const y1_r = centerY + inner_radius * Math.sin(start);
+    const x2_r = centerX + inner_radius * Math.cos(end);
+    const y2_r = centerY + inner_radius * Math.sin(end);
+
+    // Calculate start and end points on the OUTER circle
+    const x1_R = centerX + outer_radius * Math.cos(start);
+    const y1_R = centerY + outer_radius * Math.sin(start);
+    const x2_R = centerX + outer_radius * Math.cos(end);
+    const y2_R = centerY + outer_radius * Math.sin(end);
 
     // Calculate the arc span
     let arcSpan = this.angle2 - this.angle1;
@@ -278,10 +286,12 @@ class CircularHueSlider {
     // Determine if it's a large arc (>180 degrees)
     const largeArc = arcSpan > 180 ? 1 : 0;
 
-    // Create the SVG arc path (always goes clockwise from handle1 to handle2)
-    const pathData = `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`;
-
-    document.getElementById("arc-path").setAttribute("d", pathData);
+    // Create the SVG inner arc path
+    const pathData_inner = `M ${x1_r} ${y1_r} A ${inner_radius} ${inner_radius} 0 ${largeArc} 1 ${x2_r} ${y2_r}`;
+    document.getElementById("arc-path-inner").setAttribute("d", pathData_inner);
+    // outer arc path
+    const pathData_outer = `M ${x1_R} ${y1_R} A ${outer_radius} ${outer_radius} 0 ${largeArc} 1 ${x2_R} ${y2_R}`;
+    document.getElementById("arc-path-outer").setAttribute("d", pathData_outer);
   }
 
   getHueRange() {
@@ -407,12 +417,6 @@ function main() {
   loadMesh();
   slicer = new Slicer();
 
-  // Initialize circular hue slider
-  const circularHueSlider = new CircularHueSlider("hue-slider");
-  circularHueSlider.onChange = (range) => {
-    console.log("Hue range:", range);
-    // Connect to your slicer here
-  };
   initUI();
   resize();
   animate();
