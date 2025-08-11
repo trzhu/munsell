@@ -236,6 +236,7 @@ def to_mesh(df_3d):
 #   80+ hue steps
 #   20-30+ value steps
 #   30+ chroma steps
+# TODO: I SHOULD USE ALL.DAT TO INTERPOLATE NEAR THE EDGES!!
 def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
     """
     hue_steps : int

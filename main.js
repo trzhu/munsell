@@ -12,6 +12,21 @@ const meshes = {}; // dictionary of meshes
 
 let litMaterial, unlitMaterial;
 
+// Scene configurations
+const sceneConfigs = {
+  default: {
+    name: "Volume",
+    visible: ["shell"],
+    hidden: ["pointcloud_interpolated", "pointcloud_original"]
+  },
+  pointCloud: {
+    name: "Points",
+    visible: ["pointcloud_original"],
+    hidden: ["shell", "pointcloud_interpolated"]
+  }
+};
+
+
 // init scene + camera + lights
 function initScene() {
   // scene
@@ -65,24 +80,22 @@ function initUI() {
   document.getElementById("floating-ui").appendChild(toggleLightButton);
 
   toggleLightButton.addEventListener("click", () => {
-    if (mesh) {
-      if (mesh.material === litMaterial) {
-        mesh.material = unlitMaterial;
-        toggleLightButton.textContent = "Turn on Lighting";
-      } else {
-        mesh.material = litMaterial;
-        toggleLightButton.textContent = "Show Exact Color";
-      }
+    if (meshes["shell"]) {
+    const shellMesh = meshes["shell"].mesh;
+    if (shellMesh.material === litMaterial) {
+      shellMesh.material = unlitMaterial;
+      toggleLightButton.textContent = "Turn on Lighting";
+    } else {
+      shellMesh.material = litMaterial;
+      toggleLightButton.textContent = "Show Exact Color";
     }
+  }
   });
 
   // Initialize circular hue slider
   const circularHueSlider = new CircularHueSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
-    // console.log("Hue range:", range);
-    if (slicer) {
-      slicer.setHueRange(range.start, range.end);
-    }
+    // todo: new slicer
   };
 
   // Chroma slider
@@ -96,6 +109,37 @@ function initUI() {
   document.querySelector("#value-slider").addEventListener("input", (e) => {
     const val = parseFloat(e.target.value);
     slicer.setValue(val);
+  });
+
+  const sceneSelect = document.getElementById('sceneSelect');
+  
+  sceneSelect.addEventListener('change', (event) => {
+    const selectedScene = event.target.value;
+    switchScene(selectedScene);
+  });
+
+  // Set default scene (shell only)
+  switchScene('default');
+}
+
+// Scene switching function
+function switchScene(sceneKey) {
+  const config = sceneConfigs[sceneKey];
+
+  if (!config) return;
+
+  // Hide all meshes first
+  Object.keys(meshes).forEach(meshName => {
+    if (meshes[meshName] && meshes[meshName].mesh) {
+      meshes[meshName].mesh.visible = false;
+    }
+  });
+
+  // Show only the meshes specified in the scene config
+  config.visible.forEach(meshName => {
+    if (meshes[meshName] && meshes[meshName].mesh) {
+      meshes[meshName].mesh.visible = true;
+    }
   });
 }
 
@@ -264,34 +308,6 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 
-// load mesh from PLY file
-// TODO: this one loads the solid mesh
-// later might load point cloud as well
-// function loadMesh() {
-//   const loader = new PLYLoader();
-//   loader.load("./munsell_mesh.ply", (geometry) => {
-//     geometry.computeVertexNormals();
-
-//     litMaterial = new THREE.MeshStandardMaterial({
-//       vertexColors: true,
-//       clipIntersection: true,
-//     });
-
-//     unlitMaterial = new THREE.MeshBasicMaterial({
-//       vertexColors: true,
-//       clipIntersection: true,
-//     });
-
-//     slicer.applyToMaterial(litMaterial);
-//     slicer.applyToMaterial(unlitMaterial);
-
-//     mesh = new THREE.Mesh(geometry, unlitMaterial);
-//     scene.add(mesh);
-
-//     centerCamera(mesh);
-//   });
-// }
-
 // Generalized mesh loader
 function loadMeshes() {
   const meshConfigs = [
@@ -327,7 +343,7 @@ function loadMeshes() {
         points: () =>
           new THREE.PointsMaterial({
             vertexColors: true,
-            size: 2,
+            size: 0,
           }),
       },
       postProcess: (geometry, meshObj) => {
@@ -347,9 +363,7 @@ function loadMeshes() {
             size: 4,
           }),
       },
-      postProcess: (geometry, meshObj) => {
-        // i think no slicer for this one actually
-      },
+      // no post-process for original point cloud
     }
   ];
 
@@ -393,12 +407,12 @@ function loadMeshes() {
       // Store reference
       meshes[config.name] = meshObj;
 
+      // when we load the shell mesh, center the camera on it
       if (config.name === "shell") {
-        centerCamera(threejsObject); // or meshObj.mesh
+        centerCamera(threejsObject);
       }
     });
   });
-
 }
 
 // fit camera to be aligned with/look at mesh
@@ -414,8 +428,8 @@ function centerCamera(object, scale = 1, offset = 0.167) {
   controls.target.copy(center);
 
   const maxDim = Math.max(size.x, size.y, size.z);
-  const aspect =
-    renderer.domElement.clientWidth / renderer.domElement.clientHeight;
+  const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
+  
   // offset camera a bit so that there is space at the right for ui controls
   const offsetX = offset * maxDim;
 
