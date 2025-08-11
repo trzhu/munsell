@@ -7,7 +7,9 @@ let scene, camera, renderer, controls;
 let slicer;
 let isPaused = false;
 
-let mesh = null; // reference to loaded mesh
+const meshes = {}; // dictionary of meshes 
+// keys: "shell", "pointcloud", "pointcloud_original"
+
 let litMaterial, unlitMaterial;
 
 // init scene + camera + lights
@@ -97,92 +99,9 @@ function initUI() {
   });
 }
 
-// TODO: look into stencils to see if that can help me colour in the clipped parts
-// either that or I'll create faces for every fin
+// TODO: yeah this whole thing is getting rewritten
 class Slicer {
   constructor() {
-    // Plane definitions
-    this.horizontal = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    this.radial_lower = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
-    this.radial_upper = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
-    
-    this.clippingPlanes = [this.horizontal, this.radial_lower, this.radial_upper];
-    
-    // State
-    this.hueStart = 0;
-    this.hueEnd = 60;
-    this.meshRotation = 0;
-    this.maxRadius = 1; // For chroma (not yet implemented)
-  }
-
-  // ===== MATERIAL MANAGEMENT =====
-  applyToMaterial(material) {
-    material.clippingPlanes = this.clippingPlanes;
-    material.clipIntersection = false;
-    material.needsUpdate = true;
-  }
-
-  updateMaterials() {
-    if (typeof litMaterial !== 'undefined' && litMaterial) {
-      litMaterial.needsUpdate = true;
-    }
-    if (typeof unlitMaterial !== 'undefined' && unlitMaterial) {
-      unlitMaterial.needsUpdate = true;
-    }
-  }
-
-  // helper in case i change hue to be on a diff scale than 0-360 later
-  hueToRadians(hueDegrees) {
-    return (hueDegrees * Math.PI) / 180;
-  }
-
-  // PUBLIC SETTERS
-  setValue(offset) {
-    // Horizontal plane for value slicing (mesh height is 30)
-    this.horizontal.constant = -offset;
-    this.updateMaterials();
-  }
-
-  setHueRange(startAngle, endAngle) {
-    this.hueStart = startAngle;
-    this.hueEnd = endAngle;
-    this.updateRadialPlanes();
-  }
-
-  setChroma(maxRadius) {
-    this.maxRadius = maxRadius;
-    // TODO idk how I'm gonna do chroma slicing lmao
-  }
-
-  updateMeshRotation(meshRotationY) {
-    this.meshRotation = meshRotationY;
-    this.updateRadialPlanes();
-  }
-
-  // PRIVATE IMPLEMENTATION
-  updateRadialPlanes() {
-    // Convert hue angles to world space, including mesh rotation
-    const startRadians = this.hueToRadians(this.hueStart) + this.meshRotation;
-    const endRadians = this.hueToRadians(this.hueEnd) + this.meshRotation;
-
-    // Lower bound plane - clips everything "before" the start angle
-    this.radial_lower.normal.set(
-      Math.cos(startRadians), 
-      0, 
-      Math.sin(startRadians)
-    );
-    this.radial_lower.constant = 0;
-
-    // Upper bound plane - clips everything "after" the end angle
-    // Normal points inward to create the closing edge of the pie slice
-    this.radial_upper.normal.set(
-      -Math.cos(endRadians), 
-      0, 
-      -Math.sin(endRadians)
-    );
-    this.radial_upper.constant = 0;
-
-    this.updateMaterials();
   }
 }
 
@@ -348,29 +267,138 @@ window.addEventListener("resize", resize);
 // load mesh from PLY file
 // TODO: this one loads the solid mesh
 // later might load point cloud as well
-function loadMesh() {
+// function loadMesh() {
+//   const loader = new PLYLoader();
+//   loader.load("./munsell_mesh.ply", (geometry) => {
+//     geometry.computeVertexNormals();
+
+//     litMaterial = new THREE.MeshStandardMaterial({
+//       vertexColors: true,
+//       clipIntersection: true,
+//     });
+
+//     unlitMaterial = new THREE.MeshBasicMaterial({
+//       vertexColors: true,
+//       clipIntersection: true,
+//     });
+
+//     slicer.applyToMaterial(litMaterial);
+//     slicer.applyToMaterial(unlitMaterial);
+
+//     mesh = new THREE.Mesh(geometry, unlitMaterial);
+//     scene.add(mesh);
+
+//     centerCamera(mesh);
+//   });
+// }
+
+// Generalized mesh loader
+function loadMeshes() {
+  const meshConfigs = [
+    {
+      file: "./munsell_mesh.ply",
+      name: "shell",
+      type: "mesh",
+      materials: {
+        lit: () =>
+          new THREE.MeshStandardMaterial({
+            vertexColors: true,
+          }),
+        unlit: () =>
+          new THREE.MeshBasicMaterial({
+            vertexColors: true,
+          }),
+      },
+      postProcess: (geometry, meshObj) => {
+        geometry.computeVertexNormals();
+
+        // TODO: APPLY SLICING
+
+        litMaterial = meshObj.materials.lit;
+        unlitMaterial = meshObj.materials.unlit;
+      },
+    },
+    // interpolated point cloud
+    {
+      file: "./munsell_pointcloud.ply",
+      name: "pointcloud_interpolated",
+      type: "points",
+      materials: {
+        points: () =>
+          new THREE.PointsMaterial({
+            vertexColors: true,
+            size: 2,
+          }),
+      },
+      postProcess: (geometry, meshObj) => {
+        // Apply custom shader for slicing
+        // slicer.applyToPointMaterial(meshObj.materials.points);
+      },
+    },
+    // raw real.dat data points
+    {
+      file: "./munsell_pointcloud_original.ply",
+      name: "pointcloud_original",
+      type: "points",
+      materials: {
+        points: () =>
+          new THREE.PointsMaterial({
+            vertexColors: true,
+            size: 4,
+          }),
+      },
+      postProcess: (geometry, meshObj) => {
+        // i think no slicer for this one actually
+      },
+    }
+  ];
+
   const loader = new PLYLoader();
-  loader.load("./munsell_mesh.ply", (geometry) => {
-    geometry.computeVertexNormals();
 
-    litMaterial = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      clipIntersection: true,
+  meshConfigs.forEach((config) => {
+    loader.load(config.file, (geometry) => {
+      // Create materials
+      const materials = {};
+      Object.entries(config.materials).forEach(([key, materialFactory]) => {
+        materials[key] = materialFactory();
+      });
+
+      // Create Three.js object
+      let threejsObject;
+      if (config.type === "mesh") {
+        threejsObject = new THREE.Mesh(
+          geometry,
+          materials.unlit || materials.lit
+        );
+      } else if (config.type === "points") {
+        threejsObject = new THREE.Points(geometry, materials.points);
+      }
+
+      // Store mesh data
+      const meshObj = {
+        geometry,
+        materials,
+        mesh: threejsObject,
+        config,
+      };
+
+      // Run post-processing
+      if (config.postProcess) {
+        config.postProcess(geometry, meshObj);
+      }
+
+      // Add to scene
+      scene.add(threejsObject);
+
+      // Store reference
+      meshes[config.name] = meshObj;
+
+      if (config.name === "shell") {
+        centerCamera(threejsObject); // or meshObj.mesh
+      }
     });
-
-    unlitMaterial = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      clipIntersection: true,
-    });
-
-    slicer.applyToMaterial(litMaterial);
-    slicer.applyToMaterial(unlitMaterial);
-
-    mesh = new THREE.Mesh(geometry, unlitMaterial);
-    scene.add(mesh);
-
-    centerCamera(mesh);
   });
+
 }
 
 // fit camera to be aligned with/look at mesh
@@ -388,7 +416,7 @@ function centerCamera(object, scale = 1, offset = 0.167) {
   const maxDim = Math.max(size.x, size.y, size.z);
   const aspect =
     renderer.domElement.clientWidth / renderer.domElement.clientHeight;
-  // offset camera a bit so that
+  // offset camera a bit so that there is space at the right for ui controls
   const offsetX = offset * maxDim;
 
   camera.left = (-maxDim * aspect * 0.5) / scale + offsetX;
@@ -411,9 +439,10 @@ function centerCamera(object, scale = 1, offset = 0.167) {
 // animate
 function animate() {
   requestAnimationFrame(animate);
-  if (!isPaused && mesh) {
-    mesh.rotation.y += 0.01;
-    slicer.updateMeshRotation(-mesh.rotation.y);
+  if (!isPaused) {
+    for (const m in meshes) {
+      meshes[m].mesh.rotation.y += 0.01;
+    }
   }
 
   renderer.render(scene, camera);
@@ -423,7 +452,7 @@ function animate() {
 
 function main() {
   initScene();
-  loadMesh();
+  loadMeshes();
   slicer = new Slicer();
 
   initUI();
