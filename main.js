@@ -7,7 +7,7 @@ let scene, camera, renderer, controls;
 let slicer;
 let isPaused = false;
 
-const meshes = {}; // dictionary of meshes 
+const meshes = {}; // dictionary of meshes
 // keys: "shell", "pointcloud", "pointcloud_original"
 
 let litMaterial, unlitMaterial;
@@ -17,15 +17,14 @@ const sceneConfigs = {
   default: {
     name: "Volume",
     visible: ["shell"],
-    hidden: ["pointcloud_interpolated", "pointcloud_original"]
+    hidden: ["pointcloud_interpolated", "pointcloud_original"],
   },
   pointCloud: {
     name: "Points",
     visible: ["pointcloud_original"],
-    hidden: ["shell", "pointcloud_interpolated"]
-  }
+    hidden: ["shell", "pointcloud_interpolated"],
+  },
 };
-
 
 // init scene + camera + lights
 function initScene() {
@@ -74,18 +73,18 @@ function initUI() {
   });
 
   // lighting toggle button
-  const toggleLightButton = document.getElementById('toggle-light');
+  const toggleLightButton = document.getElementById("toggle-light");
   toggleLightButton.addEventListener("click", () => {
     if (meshes["shell"]) {
-    const shellMesh = meshes["shell"].mesh;
-    if (shellMesh.material === litMaterial) {
-      shellMesh.material = unlitMaterial;
-      toggleLightButton.textContent = "Turn on Lighting";
-    } else {
-      shellMesh.material = litMaterial;
-      toggleLightButton.textContent = "Show Exact Color";
+      const shellMesh = meshes["shell"].mesh;
+      if (shellMesh.material === litMaterial) {
+        shellMesh.material = unlitMaterial;
+        toggleLightButton.textContent = "Turn on Lighting";
+      } else {
+        shellMesh.material = litMaterial;
+        toggleLightButton.textContent = "Show Exact Color";
+      }
     }
-  }
   });
 
   // Initialize circular hue slider
@@ -107,9 +106,9 @@ function initUI() {
     slicer.setValue(val);
   });
 
-  const sceneSelect = document.getElementById('sceneSelect');
-  
-  sceneSelect.addEventListener('change', (event) => {
+  const sceneSelect = document.getElementById("sceneSelect");
+
+  sceneSelect.addEventListener("change", (event) => {
     const selectedScene = event.target.value;
     switchScene(selectedScene);
   });
@@ -122,24 +121,24 @@ function switchScene(sceneKey) {
   if (!config) return;
 
   // Hide all meshes first
-  Object.keys(meshes).forEach(meshName => {
+  Object.keys(meshes).forEach((meshName) => {
     if (meshes[meshName] && meshes[meshName].mesh) {
       meshes[meshName].mesh.visible = false;
     }
   });
 
   // Show only the meshes specified in the scene config
-  config.visible.forEach(meshName => {
+  config.visible.forEach((meshName) => {
     if (meshes[meshName] && meshes[meshName].mesh) {
       meshes[meshName].mesh.visible = true;
     }
   });
 
-  const toggleLightButton = document.getElementById('toggle-light');
-  if (sceneKey === 'default') {
-    toggleLightButton.style.display = 'block';
+  const toggleLightButton = document.getElementById("toggle-light");
+  if (sceneKey === "default") {
+    toggleLightButton.style.display = "block";
   } else {
-    toggleLightButton.style.display = 'none';
+    toggleLightButton.style.display = "none";
   }
 }
 
@@ -364,7 +363,7 @@ function loadMeshes() {
           }),
       },
       // no post-process for original point cloud
-    }
+    },
   ];
 
   const loader = new PLYLoader();
@@ -414,7 +413,7 @@ function loadMeshes() {
 
       // After all meshes are loaded, set the default scene
       if (loadedCount === totalMeshes) {
-        switchScene('default');
+        switchScene("default");
       }
     });
   });
@@ -433,8 +432,9 @@ function centerCamera(object, scale = 1, offset = 0.167) {
   controls.target.copy(center);
 
   const maxDim = Math.max(size.x, size.y, size.z);
-  const aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
-  
+  const aspect =
+    renderer.domElement.clientWidth / renderer.domElement.clientHeight;
+
   // offset camera a bit so that there is space at the right for ui controls
   const offsetX = offset * maxDim;
 

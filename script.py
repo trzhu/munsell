@@ -193,6 +193,8 @@ def to_mesh(df_3d):
         slice_df = slices[v]
         idx_list = []
         for _, row in slice_df.iterrows():
+            # TODO: add additional vertex metadata for HueDeg, Chroma, and Value
+            # and isClipped
             vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], row["R"], row["G"], row["B"]))
             idx_list.append(global_index)
             global_index += 1
@@ -381,6 +383,8 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
 def to_pointcloud(df_3d):
     vertices = []
     for _, row in df_3d.iterrows():
+        # TODO: add additional vertex metadata for HueDeg, Chroma, and Value
+        # and isClipped
         x, y, z = row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"]
         r, g, b = row["R"], row["G"], row["B"]
         vertices.append((x, y, z, r, g, b))
