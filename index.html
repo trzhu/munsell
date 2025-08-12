@@ -64,6 +64,10 @@
         margin-bottom: 0.75rem;
       }
 
+      .scene-dropdown {
+        margin-bottom: 10px;
+      }
+
       /* hue slider */
       .circular-slider {
         position: relative;
@@ -183,7 +187,16 @@
         <!-- buttons -->
         <button id="toggle-rotation">Pause Rotation</button>
 
-        <!-- TODO I FORGOR TO PUT BACK THE LIGHTING BUTTON that should only be there when looking at mesh -->
+        <!-- scene select drop down -->
+        <div class="scene-dropdown">
+          <select id="sceneSelect" class="dropdown-select">
+            <option value="default" selected>Volume</option>
+            <option value="pointCloud">Points</option>
+          </select>
+        </div>
+
+        <!-- toggle lighting button -->
+        <button id="toggle-light">Turn on Lighting</button>
 
         <!-- collapsible HVC sliders -->
         <details open>
@@ -222,13 +235,6 @@
           <summary>Value</summary>
           <input id="value-slider" type="range" min="0" max="30" value="0" />
         </details>
-
-        <div class="scene-dropdown">
-          <select id="sceneSelect" class="dropdown-select">
-            <option value="default" selected>Volume</option>
-            <option value="pointCloud">Points</option>
-          </select>
-        </div>
       </div>
     </div>
 

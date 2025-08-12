@@ -74,11 +74,7 @@ function initUI() {
   });
 
   // lighting toggle button
-  const toggleLightButton = document.createElement("button");
-  toggleLightButton.textContent = "Turn on Lighting";
-  toggleLightButton.style.width = "100%";
-  document.getElementById("floating-ui").appendChild(toggleLightButton);
-
+  const toggleLightButton = document.getElementById('toggle-light');
   toggleLightButton.addEventListener("click", () => {
     if (meshes["shell"]) {
     const shellMesh = meshes["shell"].mesh;
@@ -117,9 +113,6 @@ function initUI() {
     const selectedScene = event.target.value;
     switchScene(selectedScene);
   });
-
-  // Set default scene (shell only)
-  switchScene('default');
 }
 
 // Scene switching function
@@ -141,6 +134,13 @@ function switchScene(sceneKey) {
       meshes[meshName].mesh.visible = true;
     }
   });
+
+  const toggleLightButton = document.getElementById('toggle-light');
+  if (sceneKey === 'default') {
+    toggleLightButton.style.display = 'block';
+  } else {
+    toggleLightButton.style.display = 'none';
+  }
 }
 
 // TODO: yeah this whole thing is getting rewritten
@@ -368,6 +368,8 @@ function loadMeshes() {
   ];
 
   const loader = new PLYLoader();
+  let loadedCount = 0;
+  const totalMeshes = meshConfigs.length;
 
   meshConfigs.forEach((config) => {
     loader.load(config.file, (geometry) => {
@@ -401,15 +403,18 @@ function loadMeshes() {
         config.postProcess(geometry, meshObj);
       }
 
-      // Add to scene
       scene.add(threejsObject);
-
-      // Store reference
       meshes[config.name] = meshObj;
+      loadedCount++;
 
       // when we load the shell mesh, center the camera on it
       if (config.name === "shell") {
         centerCamera(threejsObject);
+      }
+
+      // After all meshes are loaded, set the default scene
+      if (loadedCount === totalMeshes) {
+        switchScene('default');
       }
     });
   });
