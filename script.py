@@ -50,7 +50,7 @@ def Lab_to_sRGB(lab):
     xyz = Lab_to_XYZ(lab, illuminant=ILLUM_C)
     sRGB = XYZ_to_sRGB(xyz, illuminant=ILLUM_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
-    is_clipped = (sRGB == sRGB_clipped)
+    is_clipped = np.any(sRGB != sRGB_clipped, axis = 1)
     
     return sRGB_clipped, is_clipped
 
@@ -67,7 +67,8 @@ def process(df):
 
     sRGB = XYZ_to_sRGB(xyz, illuminant=ILLUM_C)
     sRGB_clipped = np.clip(sRGB, 0, 1)
-    is_clipped = True if sRGB == sRGB_clipped else False
+    # true if any rgb channel was clipped
+    is_clipped = np.any(sRGB != sRGB_clipped, axis=1)
 
     # Convert to Lab
     Lab = XYZ_to_Lab(xyz, illuminant=ILLUM_C)
@@ -193,9 +194,10 @@ def to_mesh(df_3d):
         slice_df = slices[v]
         idx_list = []
         for _, row in slice_df.iterrows():
-            # TODO: add additional vertex metadata for HueDeg, Chroma, and Value
-            # and isClipped
-            vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], row["R"], row["G"], row["B"]))
+            vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], 
+                             row["R"], row["G"], row["B"], 
+                             row["HueDeg"], row["Value"], row["Chroma"],
+                             row["is_clipped"]))
             idx_list.append(global_index)
             global_index += 1
         # and index them (they will automatically go in by hue order)
@@ -387,7 +389,8 @@ def to_pointcloud(df_3d):
         # and isClipped
         x, y, z = row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"]
         r, g, b = row["R"], row["G"], row["B"]
-        vertices.append((x, y, z, r, g, b))
+        h, v, c, is_clipped = row["HueDeg"], row["Value"], row["Chroma"], row["is_clipped"]
+        vertices.append((x, y, z, r, g, b, h, v, c, is_clipped))
     return vertices
 
 def write_obj(vertices, faces, filename="munsell_mesh.obj"):
@@ -409,15 +412,21 @@ def write_ply(vertices, faces, filename):
         f.write("property uchar red\n")
         f.write("property uchar green\n")
         f.write("property uchar blue\n")
+        f.write("property float hue\n")
+        f.write("property float value\n")
+        f.write("property float chroma\n")
+        f.write("property uchar is_clipped\n")
         f.write(f"element face {len(faces)}\n")
         f.write("property list uchar int vertex_indices\n")
         f.write("end_header\n")
 
-        for x, y, z, r, g, b in vertices:
+        for x, y, z, r, g, b, h, v, c, is_clipped in vertices:
             r_byte = int(r * 255)
             g_byte = int(g * 255)
             b_byte = int(b * 255)
-            f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte}\n")
+            # csv doesnt preserve types
+            is_clipped_byte = int(is_clipped.lower() == 'true')
+            f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte} {h} {v} {c} {is_clipped_byte}\n")
 
         for face in faces:
             f.write(f"3 {' '.join(map(str, face))}\n")
@@ -430,17 +439,17 @@ def main():
     # df_processed.to_csv("munsell_parsed.csv", index=False)
     # print("saved to munsell_parsed.csv")
     
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    # df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     
-    df_interpolated = interpolate(df_processed)
-    df_interpolated.to_csv("munsell_interpolated.csv", index=False)
-    print("saved to munsell_interpolated.csv")
+    # df_interpolated = interpolate(df_processed)
+    # df_interpolated.to_csv("munsell_interpolated.csv", index=False)
+    # print("saved to munsell_interpolated.csv")
     
-    df_3d = to_3d_coordinates(df_interpolated)
-    df_3d.to_csv("munsell_3d.csv", index=False)
-    print("saved to munsell_3d.csv")
+    # df_3d = to_3d_coordinates(df_interpolated)
+    # df_3d.to_csv("munsell_3d.csv", index=False)
+    # print("saved to munsell_3d.csv")
     
-    # df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
+    df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
     
     # create a point cloud
     vertices = to_pointcloud(df_3d)
