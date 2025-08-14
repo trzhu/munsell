@@ -3,7 +3,6 @@ import numpy as np
 import re, urllib.request
 from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
-from scipy.interpolate import griddata
 
 # TODO compute a scaling factor that makes the Y axis perceptually uniform?
 Y_SCALE = 3
@@ -54,7 +53,9 @@ def Lab_to_sRGB(lab):
     
     return sRGB_clipped, is_clipped
 
-
+# adds Lab and RGB conversions to the dataframe
+# also adds grayscale points to each value plate by avging luminosity
+# and white and black
 def process(df):
     df["HueDeg"] = df["Hue"].apply(munsell_hue_to_deg)
         
@@ -103,18 +104,10 @@ def process(df):
             "Hue": "N",
             "Value": value,
             "Chroma": 0.0,
-            "x": gray_xyY[0, 0],
-            "y": gray_xyY[0, 1],
-            "Y_lum": gray_xyY[0, 2],
-            "X": gray_xyz[0, 0],
-            "Y": gray_xyz[0, 1],
-            "Z": gray_xyz[0, 2],
-            "R": gray_rgb[0, 0],
-            "G": gray_rgb[0, 1],
-            "B": gray_rgb[0, 2],
-            "L*": avg_L,
-            "a*": 0.0,
-            "b*": 0.0,
+            "x": gray_xyY[0, 0], "y": gray_xyY[0, 1], "Y_lum": gray_xyY[0, 2],
+            "X": gray_xyz[0, 0], "Y": gray_xyz[0, 1], "Z": gray_xyz[0, 2],
+            "R": gray_rgb[0, 0], "G": gray_rgb[0, 1], "B": gray_rgb[0, 2],
+            "L*": avg_L, "a*": 0.0, "b*": 0.0,
             "HueDeg": 0,
             "is_clipped": False
         })
@@ -131,25 +124,15 @@ def process(df):
             "Hue": "N",
             "Value": value,
             "Chroma": 0.0,
-            "x": xyY[0, 0],
-            "y": xyY[0, 1],
-            "Y_lum": xyY[0, 2],
-            "X": xyz[0, 0],
-            "Y": xyz[0, 1],
-            "Z": xyz[0, 2],
-            "R": rgb[0, 0],
-            "G": rgb[0, 1],
-            "B": rgb[0, 2],
-            "L*": L,
-            "a*": 0.0,
-            "b*": 0.0,
+            "x": xyY[0, 0], "y": xyY[0, 1], "Y_lum": xyY[0, 2],
+            "X": xyz[0, 0], "Y": xyz[0, 1], "Z": xyz[0, 2], 
+            "R": rgb[0, 0], "G": rgb[0, 1], "B": rgb[0, 2],
+            "L*": L, "a*": 0.0, "b*": 0.0,
             "HueDeg": 0,
             "is_clipped": False
         })
 
     df = pd.concat([df, pd.DataFrame(grayscale_points)], ignore_index=True)
-    
-    
     
     return df
 
@@ -241,7 +224,7 @@ def to_mesh(df_3d):
 #   20-30+ value steps
 #   30+ chroma steps
 # TODO: I SHOULD USE ALL.DAT TO INTERPOLATE NEAR THE EDGES!!
-def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
+def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     """
     hue_steps : int
         Number of subdivisions between adjacent hue samples (of the same value and chroma)
@@ -272,10 +255,17 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
     
     all_points = []
     
+    # build a map of maximum chroma at each (value, hue) position
+    # this is so when I interpolate later, I can reference the max chroma of neighbouring "spokes"
+    max_chroma = {}
+    
     # interpolate radially along Chroma axis
     # splits the df into buckets that have the same value and huedeg
     # so we can interpolate between chroma
     for (value, hue), group in df.groupby(["Value", "HueDeg"]):
+        # save for later
+        max_chroma[(value, hue)] = group["Chroma"].max()
+        
         group = group.sort_values("Chroma")
         chroma_pts = group[["Chroma", "L*", "a*", "b*"]].to_numpy()
         for i in range(len(chroma_pts) - 1):
@@ -306,8 +296,6 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
     all_points = []
     
     # interpolate vertically, between Value "plates"
-    # TODO: if two layers have a different amount of vertices, the interpolated layer should have their avg
-    # rn this just takes takes their minimum
     for (chroma, hue), group in df.groupby(["Chroma", "HueDeg"]):
         group = group.sort_values("Value")
         value_pts = group[["Value", "L*", "a*", "b*"]].to_numpy()
@@ -335,7 +323,6 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
     all_points = []
     
     # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
-    # TODO if two spokes are different lengths, the interpolated spoke should again have their avg
     for (value, chroma), group in df.groupby(["Value", "Chroma"]):
         
         # skip grayscale or groups with only one vertex
@@ -379,6 +366,109 @@ def interpolate(df, hue_steps=2, value_steps=2, chroma_steps=3):
     
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
 
+    # after simple interpolation, detect which new spokes need extension based on their neighbours
+    extension_points = []
+    
+    # group by (Value, HueDeg) to work spoke by spoke
+    # one dimension at a time
+    # first, find hue neighbours (left and right neighbours)
+    for (value, hue), spoke in df[df['Value'] % 1 == 0].groupby(["Value", "HueDeg"]):
+        
+        # skip black and white
+        if value in [0.0, 10] or hue == 0.0:
+            continue
+        
+        # skip original spokes
+        if spoke["is_original"].all():
+            continue
+        
+        current_max_chroma = spoke["Chroma"].max()
+        
+        # in the original data, HueDeg has intervals of 9
+        left_hue = 9 * (hue // 9)
+        right_hue = (9 + left_hue) % 360
+        # t for lerp
+        t = (hue % 9) / 9
+        
+        # corresponding munsell hues (e.g. 7.5YR) etc
+        left_munsellhue = df[df['HueDeg'] == left_hue]['Hue'].iloc[0]
+        right_munsellhue = df[df['HueDeg'] == right_hue]['Hue'].iloc[0]
+        
+        # Calculate what this spoke's length should be
+        # by lerping between left and right max chromas
+        target_max_chroma = (1-t) * max_chroma[(value, left_hue)] + t * max_chroma[(value, right_hue)]
+        
+        # np.arange is range with floats
+        for chroma in np.arange(current_max_chroma, target_max_chroma + 1/chroma_steps, 1/chroma_steps):
+            
+            # refer to integer chroma values in df_all
+            lower_chroma = int(np.floor(chroma))
+            upper_chroma = int(np.ceil(chroma))
+            
+            # the 4 neighbours
+            left_inner_ref = df_all[(df_all['Hue'] == left_munsellhue) & 
+                                (df_all['Value'] == value) & 
+                                (df_all['Chroma'] == lower_chroma)].iloc[0]
+            
+            left_outer_ref = df_all[(df_all['Hue'] == left_munsellhue) & 
+                                (df_all['Value'] == value) & 
+                                (df_all['Chroma'] == upper_chroma)].iloc[0]
+            right_innter_ref = df_all[(df_all['Hue'] == right_munsellhue) & 
+                                    (df_all['Value'] == value) & 
+                                    (df_all['Chroma'] == lower_chroma)].iloc[0]
+            
+            right_outer_ref = df_all[(df_all['Hue'] == right_munsellhue) & 
+                                    (df_all['Value'] == value) & 
+                                    (df_all['Chroma'] == upper_chroma)].iloc[0]
+            
+            # calculate lerp factor t (along chroma axis)
+            if upper_chroma == lower_chroma:
+                t = 0
+            else:
+                t = (chroma - lower_chroma) / (upper_chroma - lower_chroma)
+            
+            # Interpolate in Lab space
+            # have to convert to lab first
+            lower_lab = np.array([lower_ref['L'], lower_ref['a'], lower_ref['b']])
+            upper_lab = np.array([upper_ref['L'], upper_ref['a'], upper_ref['b']])
+            lerp_lab = (1-t) * lower_lab + t * upper_lab
+            
+            L, a, b = lerp_lab
+            
+            sRGB, is_clipped = Lab_to_sRGB(Lab)
+                
+            extension_points.append({
+                "HueDeg": hue,
+                "Value": value,
+                "Chroma": chroma,
+                "L*": L, "a*": a, "b*": b,
+                "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
+                "is_original": False,
+                "is_clipped": is_clipped,
+            })
+    
+    # NEXT, find value neighbours (above & below)
+    # in the original data, value is in intervals of one
+    for (value, hue), spoke in df[df["HueDeg"] % 9 == 0].groupby(["Value", "HueDeg"]):
+        # print(f"val loop. value, hue = {value}, {hue}")
+        
+        # skip original spokes
+        if spoke["is_original"].all():
+            continue
+        
+        current_max_chroma = spoke["Chroma"].max()
+        
+        below_val = int(value)
+        t = value - below_val
+        
+        target_max_chroma = (1 - t) * max_chroma[(below_val, hue)] + t * max_chroma[(below_val + 1, hue)]
+        
+        if target_max_chroma > current_max_chroma:
+            # print(f"target, current max chromas: {target_max_chroma}, {current_max_chroma}")
+            # TODO: EXTEND SPOKE
+            continue
+            
+    df = pd.concat([df, pd.DataFrame(extension_points)], ignore_index=True)
     return df
 
 # put all vertices in a point cloud
@@ -439,15 +529,19 @@ def main():
     # df_processed.to_csv("munsell_parsed.csv", index=False)
     # print("saved to munsell_parsed.csv")
     
-    # df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    all_url = "https://www.rit-mcsl.org/MunsellRenotation/all.dat"
+    df_all = load_munsell_dat(all_url)
+    # df_all.to_csv("munsell_all.csv", index = False)
     
-    # df_interpolated = interpolate(df_processed)
-    # df_interpolated.to_csv("munsell_interpolated.csv", index=False)
-    # print("saved to munsell_interpolated.csv")
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     
-    # df_3d = to_3d_coordinates(df_interpolated)
-    # df_3d.to_csv("munsell_3d.csv", index=False)
-    # print("saved to munsell_3d.csv")
+    df_interpolated = interpolate(df_processed, df_all)
+    df_interpolated.to_csv("munsell_interpolated.csv", index=False)
+    print("saved to munsell_interpolated.csv")
+    
+    df_3d = to_3d_coordinates(df_interpolated)
+    df_3d.to_csv("munsell_3d.csv", index=False)
+    print("saved to munsell_3d.csv")
     
     df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
     
