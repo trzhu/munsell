@@ -372,9 +372,11 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     # one dimension at a time
     # first, find hue neighbours (left and right neighbours)
     for (value, hue), spoke in df[df['Value'] % 1 == 0].groupby(["Value", "HueDeg"]):
+        # for floating point issues
+        value, hue = np.round(value), np.round(hue)
         
-        # skip black and white
-        if value in [0.0, 10] or hue == 0.0:
+        # skip black and white and grayscale
+        if value in [0, 10] or hue == 0:
             continue
         
         # skip original spokes
@@ -403,7 +405,7 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
             # refer to integer chroma values in df_all
             inner_chroma = int(np.floor(chroma))
             outer_chroma = inner_chroma + 1
-            
+            """
             # the 4 reference neighbours
             left_inner = df_all[(df_all['Hue'] == left_munsellhue) & 
                                 (df_all['Value'] == value) & 
@@ -450,10 +452,25 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
                 "is_original": False,
                 "is_clipped": is_clipped,
             })
+            """
+            # debug - place black points
+            extension_points.append({
+                "HueDeg": hue,
+                "Value": value,
+                "Chroma": chroma,
+                "L*": 1, "a*": 0, "b*": 0,
+                "R": 0.5, "G": 0.5, "B": 0.5,
+                "is_original": False,
+                "is_clipped": False,
+            })
     
     # NEXT, find value neighbours (above & below)
     # in the original data, value is in intervals of one
     for (value, hue), spoke in df[df["HueDeg"] % 9 == 0].groupby(["Value", "HueDeg"]):
+        
+        # skip black and white and grayscale
+        if value in [0, 10] or hue == 0:
+            continue
         
         # skip original spokes
         if spoke["is_original"].all():
@@ -461,15 +478,28 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
         
         current_max_chroma = spoke["Chroma"].max()
         
-        below_val = int(value)
+        below_val = np.floor(value)
         t = value - below_val
+        
+        print(below_val, hue)
         
         target_max_chroma = (1 - t) * max_chroma[(below_val, hue)] + t * max_chroma[(below_val + 1, hue)]
         
-        if target_max_chroma > current_max_chroma:
+        for chroma in np.arange(current_max_chroma, target_max_chroma, 1/chroma_steps):
             # print(f"target, current max chromas: {target_max_chroma}, {current_max_chroma}")
             # TODO: EXTEND SPOKE
-            continue
+            extension_points.append({
+                "HueDeg": hue,
+                "Value": value,
+                "Chroma": chroma,
+                "L*": 1, "a*": 0, "b*": 0,
+                "R": 0.5, "G": 0.5, "B": 0.5,
+                "is_original": False,
+                "is_clipped": False,
+            })
+            
+        
+        
             
     df = pd.concat([df, pd.DataFrame(extension_points)], ignore_index=True)
     return df
