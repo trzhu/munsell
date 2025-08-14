@@ -453,7 +453,7 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
                 "is_clipped": is_clipped,
             })
             """
-            # debug - place black points
+            # placeholder: place gray points (it works)
             extension_points.append({
                 "HueDeg": hue,
                 "Value": value,
@@ -487,7 +487,8 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
         
         for chroma in np.arange(current_max_chroma, target_max_chroma, 1/chroma_steps):
             # print(f"target, current max chromas: {target_max_chroma}, {current_max_chroma}")
-            # TODO: EXTEND SPOKE
+            
+            # placeholder gray points
             extension_points.append({
                 "HueDeg": hue,
                 "Value": value,
