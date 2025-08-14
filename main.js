@@ -88,23 +88,27 @@ function initUI() {
   });
 
   // Initialize circular hue slider
-  const circularHueSlider = new CircularHueSlider("hue-slider");
+  const circularHueSlider = new CircularSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
-    // todo: new slicer
+    // todo: slider
+    slicer.setHueRange(range.start, range.end);
+
+    // todo: change chroma slicer's colours on change as well
   };
 
-  // Chroma slider
-  document.querySelector("#chroma-slider").addEventListener("input", (e) => {
-    const val = parseFloat(e.target.value);
-    slicer.setChroma(val);
-    // TODO: chroma not hooked up yet
-  });
+  // Initialize two-handle linear chroma slider
+  const chromaSlider = new TwoHandleSlider("chroma-slider", 0, 20, 10, 15);
+  chromaSlider.onChange = (range) => {
+    // todo: slider
+    slicer.setChromaRange(range.start, range.end);
+  };
 
-  // Value slider
-  document.querySelector("#value-slider").addEventListener("input", (e) => {
-    const val = parseFloat(e.target.value);
-    slicer.setValue(val);
-  });
+  // Initialize two-handle linear value slider
+  const valueSlider = new TwoHandleSlider("value-slider", 0, 30, 5, 25);
+  valueSlider.onChange = (range) => {
+    // todo: slicer
+    slicer.setValueRange(range.start, range.end);
+  };
 
   const sceneSelect = document.getElementById("sceneSelect");
 
@@ -148,7 +152,7 @@ class Slicer {
   }
 }
 
-class CircularHueSlider {
+class CircularSlider {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
     this.handle1 = document.getElementById("handle1");
@@ -285,6 +289,88 @@ class CircularHueSlider {
   notifyChange() {
     if (this.onChange) {
       this.onChange(this.getHueRange());
+    }
+  }
+}
+
+// double sided sliders for value and chroma
+class TwoHandleSlider {
+  constructor(containerId, min, max, gradientCSS) {
+    this.container = document.getElementById(containerId);
+    this.track = this.container.querySelector(".track");
+    this.range = this.container.querySelector(".range");
+    this.handle1 = this.container.querySelector(".handle1");
+    this.handle2 = this.container.querySelector(".handle2");
+
+    this.min = min;
+    this.max = max;
+    this.value1 = min;
+    this.value2 = max;
+
+    this.isDragging = false;
+    this.activeHandle = null;
+    this.onChange = null;
+
+    this.track.style.background = gradientCSS;
+    this.init();
+    this.updateDisplay();
+  }
+
+  init() {
+    this.handle1.addEventListener("mousedown", e => this.startDrag(e, "handle1"));
+    this.handle2.addEventListener("mousedown", e => this.startDrag(e, "handle2"));
+    document.addEventListener("mousemove", e => this.drag(e));
+    document.addEventListener("mouseup", () => this.endDrag());
+  }
+
+  startDrag(e, handleId) {
+    e.preventDefault();
+    this.isDragging = true;
+    this.activeHandle = handleId;
+    this.container.querySelector("." + handleId).classList.add("active");
+  }
+
+  drag(e) {
+    if (!this.isDragging || !this.activeHandle) return;
+
+    const rect = this.container.getBoundingClientRect();
+    let percent = (e.clientX - rect.left) / rect.width;
+    percent = Math.min(Math.max(percent, 0), 1);
+    const value = this.min + percent * (this.max - this.min);
+
+    if (this.activeHandle === "handle1") {
+      this.value1 = Math.min(value, this.value2); // stop overlap
+    } else {
+      this.value2 = Math.max(value, this.value1);
+    }
+
+    this.updateDisplay();
+    if (this.onChange) this.onChange(this.getValues());
+  }
+
+  endDrag() {
+    this.isDragging = false;
+    this.container.querySelectorAll(".handle").forEach(h => h.classList.remove("active"));
+  }
+
+  updateDisplay() {
+    const percent1 = (this.value1 - this.min) / (this.max - this.min);
+    const percent2 = (this.value2 - this.min) / (this.max - this.min);
+
+    this.handle1.style.left = `calc(${percent1 * 100}% - 6px)`;
+    this.handle2.style.left = `calc(${percent2 * 100}% - 6px)`;
+
+    this.range.style.left = `${percent1 * 100}%`;
+    this.range.style.width = `${(percent2 - percent1) * 100}%`;
+  }
+
+  getValues() {
+    return { start: this.value1, end: this.value2 };
+  }
+
+  setGradient(colors) {
+    if (Array.isArray(colors) && colors.length > 1) {
+      this.track.style.background = `linear-gradient(to right, ${colors.join(", ")})`;
     }
   }
 }
@@ -455,6 +541,27 @@ function centerCamera(object, scale = 1, offset = 0.167) {
   controls.update();
 }
 
+// Initialize shaders and slicing
+async function initializeSlicing() {
+  try {
+    await slicer.loadShaders();
+    console.log('Shaders loaded successfully');
+    
+    // Set up default cut face visualization
+    slicer.setCutFaceVisualization(
+      0.15,  // tolerance - how close to boundary
+      8.0,   // cut face point size
+      2.0    // normal point size
+    );
+    
+    // Set cut face color to a subtle highlight
+    slicer.setCutFaceColor(new THREE.Color(1, 0.9, 0.9), 0.9);
+    
+  } catch (error) {
+    console.error('Failed to load shaders:', error);
+  }
+}
+
 // animate
 function animate() {
   requestAnimationFrame(animate);
@@ -469,10 +576,11 @@ function animate() {
   controls.update();
 }
 
+
 function main() {
   initScene();
   loadMeshes();
-  slicer = new Slicer();
+  // slicer = new Slicer();
 
   initUI();
   resize();

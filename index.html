@@ -155,6 +155,45 @@
         border-radius: 50%;
       }
 
+      /* Value/chroma sliders */
+      .two-handle-slider {
+        position: relative;
+        width: 200px;
+        height: 20px;
+      }
+
+      .track {
+        position: absolute;
+        width: 100%;
+        height: 6px;
+        top: 7px;
+        border-radius: 3px;
+        background: linear-gradient(to right, black, white);
+      }
+
+      /* .range {
+        position: absolute;
+        height: 6px;
+        top: 7px;
+        background: rgba(255, 255, 255, 0);
+        border-radius: 3px;
+      } */
+
+      .handle {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        top: 4px;
+        background: white;
+        border: 1px solid #666;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+
+      .handle.active {
+        background: #ccc;
+      }
+
       /* Bottom content pushes everything above */
       #bottom-half {
         padding: 3rem;
@@ -228,12 +267,22 @@
 
         <details open>
           <summary>Chroma</summary>
-          <input id="chroma-slider" type="range" min="0" max="20" value="10" />
+          <div class="two-handle-slider" id="chroma-slider">
+            <div class="track"></div>
+            <div class="range"></div>
+            <div class="handle handle1"></div>
+            <div class="handle handle2"></div>
+          </div>
         </details>
 
         <details open>
           <summary>Value</summary>
-          <input id="value-slider" type="range" min="0" max="30" value="0" />
+          <div class="two-handle-slider" id="value-slider">
+            <div class="track"></div>
+            <div class="range"></div>
+            <div class="handle handle1"></div>
+            <div class="handle handle2"></div>
+          </div>
         </details>
       </div>
     </div>
