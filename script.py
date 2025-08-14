@@ -223,7 +223,6 @@ def to_mesh(df_3d):
 #   80+ hue steps
 #   20-30+ value steps
 #   30+ chroma steps
-# TODO: I SHOULD USE ALL.DAT TO INTERPOLATE NEAR THE EDGES!!
 def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     """
     hue_steps : int
@@ -387,7 +386,7 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
         # in the original data, HueDeg has intervals of 9
         left_hue = 9 * (hue // 9)
         right_hue = (9 + left_hue) % 360
-        # t for lerp
+        # t for hue lerp
         t = (hue % 9) / 9
         
         # corresponding munsell hues (e.g. 7.5YR) etc
@@ -399,42 +398,47 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
         target_max_chroma = (1-t) * max_chroma[(value, left_hue)] + t * max_chroma[(value, right_hue)]
         
         # np.arange is range with floats
-        for chroma in np.arange(current_max_chroma, target_max_chroma + 1/chroma_steps, 1/chroma_steps):
+        for chroma in np.arange(current_max_chroma, target_max_chroma, 1/chroma_steps):
             
             # refer to integer chroma values in df_all
-            lower_chroma = int(np.floor(chroma))
-            upper_chroma = int(np.ceil(chroma))
+            inner_chroma = int(np.floor(chroma))
+            outer_chroma = inner_chroma + 1
             
-            # the 4 neighbours
-            left_inner_ref = df_all[(df_all['Hue'] == left_munsellhue) & 
+            # the 4 reference neighbours
+            left_inner = df_all[(df_all['Hue'] == left_munsellhue) & 
                                 (df_all['Value'] == value) & 
-                                (df_all['Chroma'] == lower_chroma)].iloc[0]
+                                (df_all['Chroma'] == inner_chroma)].iloc[0]
             
-            left_outer_ref = df_all[(df_all['Hue'] == left_munsellhue) & 
+            left_outer = df_all[(df_all['Hue'] == left_munsellhue) & 
                                 (df_all['Value'] == value) & 
-                                (df_all['Chroma'] == upper_chroma)].iloc[0]
-            right_innter_ref = df_all[(df_all['Hue'] == right_munsellhue) & 
-                                    (df_all['Value'] == value) & 
-                                    (df_all['Chroma'] == lower_chroma)].iloc[0]
+                                (df_all['Chroma'] == outer_chroma)].iloc[0]
             
-            right_outer_ref = df_all[(df_all['Hue'] == right_munsellhue) & 
+            right_inner = df_all[(df_all['Hue'] == right_munsellhue) & 
                                     (df_all['Value'] == value) & 
-                                    (df_all['Chroma'] == upper_chroma)].iloc[0]
+                                    (df_all['Chroma'] == inner_chroma)].iloc[0]
             
-            # calculate lerp factor t (along chroma axis)
-            if upper_chroma == lower_chroma:
-                t = 0
+            right_outer = df_all[(df_all['Hue'] == right_munsellhue) & 
+                                    (df_all['Value'] == value) & 
+                                    (df_all['Chroma'] == outer_chroma)].iloc[0]
+            
+            # convert 4 neighbours to lab
+            left_inner_lab = munsell_pt_to_lab(left_inner)
+            left_outer_lab = munsell_pt_to_lab(left_outer)
+            right_inner_lab = munsell_pt_to_lab(right_inner)
+            right_outer_lab = munsell_pt_to_lab(right_outer)
+            
+            # calculate lerp factor t for chroma
+            if outer_chroma == inner_chroma:
+                t_chroma = 0
             else:
-                t = (chroma - lower_chroma) / (upper_chroma - lower_chroma)
+                t_chroma = (chroma - inner_chroma) / (outer_chroma - inner_chroma)
+                
+            # interpolate along chroma axis for each hue
+            left_lab = (1 - t_chroma) * left_inner_lab + t_chroma * left_outer_lab
+            right_lab = (1 - t_chroma) * right_inner_lab + t_chroma * right_outer_lab
             
-            # Interpolate in Lab space
-            # have to convert to lab first
-            lower_lab = np.array([lower_ref['L'], lower_ref['a'], lower_ref['b']])
-            upper_lab = np.array([upper_ref['L'], upper_ref['a'], upper_ref['b']])
-            lerp_lab = (1-t) * lower_lab + t * upper_lab
-            
-            L, a, b = lerp_lab
-            
+            lerp = (1 - t) * left_lab + t * right_lab
+            L, a, b = lerp
             sRGB, is_clipped = Lab_to_sRGB(Lab)
                 
             extension_points.append({
@@ -450,7 +454,6 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     # NEXT, find value neighbours (above & below)
     # in the original data, value is in intervals of one
     for (value, hue), spoke in df[df["HueDeg"] % 9 == 0].groupby(["Value", "HueDeg"]):
-        # print(f"val loop. value, hue = {value}, {hue}")
         
         # skip original spokes
         if spoke["is_original"].all():
@@ -470,6 +473,13 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
             
     df = pd.concat([df, pd.DataFrame(extension_points)], ignore_index=True)
     return df
+
+# helper for interpolate
+def munsell_pt_to_lab(ref_point):
+    xyY = np.array([ref_point['x'], ref_point['y'], ref_point['Y_lum']/100])
+    xyz = xyY_to_XYZ(xyY.reshape(1, -1))
+    lab = XYZ_to_Lab(xyz, illuminant=ILLUM_C)[0]
+    return lab
 
 # put all vertices in a point cloud
 def to_pointcloud(df_3d):
