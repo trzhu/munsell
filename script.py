@@ -555,12 +555,23 @@ def write_ply(vertices, faces, filename):
             r_byte = int(r * 255)
             g_byte = int(g * 255)
             b_byte = int(b * 255)
-            # csv doesnt preserve types
-            is_clipped_byte = int(is_clipped.lower() == 'true')
+            # csv may or may not preserve types, so it could be a bool or a string lol
+            if isinstance(is_clipped, bool):
+                is_clipped_byte = int(is_clipped)
+            else:
+                is_clipped_byte = int(str(is_clipped).strip().lower() == "true")
             f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte} {h} {v} {c} {is_clipped_byte}\n")
 
         for face in faces:
             f.write(f"3 {' '.join(map(str, face))}\n")
+
+def to_pointcloud_original():
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    df_3d = to_3d_coordinates(df_processed)
+    
+    vertices = to_pointcloud(df_3d)
+    write_ply(vertices, [], "munsell_pointcloud_original.ply")
+
 
 def main():
     # input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
