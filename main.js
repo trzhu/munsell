@@ -90,9 +90,8 @@ function initUI() {
   // Initialize circular hue slider
   const circularHueSlider = new CircularSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
-    // todo: slider
     slicer.setHueRange(range.start, range.end);
-    // todo: change chroma slicer's colours on change as well
+    // todo: change chroma slider's colours on change as well
   };
   circularHueSlider.onChange(circularHueSlider.getHueRange());
 
@@ -100,7 +99,7 @@ function initUI() {
   const valueSlider = new TwoHandleSlider("value-slider", 0, 10);
   valueSlider.onChange = (range) => {
     slicer.setValueRange(range.start, range.end);
-    // todo: change chroma slicer's colours on change as well
+    // todo: change hue and chroma slider's colours on change as well
   };
   valueSlider.onChange(valueSlider.getValues());
 
@@ -583,7 +582,7 @@ function loadMeshes() {
       postProcess: (geometry, meshObj) => {
         geometry.computeVertexNormals();
 
-        // TODO: APPLY SLICING
+        // TODO: APPLY SLICING to mesh
 
         litMaterial = meshObj.materials.lit;
         unlitMaterial = meshObj.materials.unlit;
@@ -596,11 +595,7 @@ function loadMeshes() {
       name: "pointcloud_interpolated",
       type: "points",
       materials: {
-        points: () =>
-          new THREE.PointsMaterial({
-            vertexColors: true,
-            size: 0,
-          }),
+        points: async () => await slicer.getMaterial("points"),
       },
       postProcess: (geometry, meshObj) => {
         // Apply custom shader for slicing
@@ -616,8 +611,6 @@ function loadMeshes() {
         points: async () => await slicer.getMaterial("points"),
       },
       postProcess: (geometry, meshObj) => {
-        console.log('Material type:', meshObj.materials.points.type);
-        console.log('Material uniforms:', meshObj.materials.points.uniforms);
         // no post-process for original point cloud
       },
     },

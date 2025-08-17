@@ -82,13 +82,14 @@
         border-radius: 50%;
         position: relative;
         background: conic-gradient(
-          /* TODO: UPDATE TO USE MUNSELL'S HUE SPACING */ hsl(0, 100%, 50%),
+          /* TODO: UPDATE TO USE MUNSELL'S HUE SPACING */ 
+          hsl(240, 100%, 50%),
+          hsl(300, 100%, 50%),
+          hsl(360, 100%, 50%),
           hsl(60, 100%, 50%),
           hsl(120, 100%, 50%),
           hsl(180, 100%, 50%),
-          hsl(240, 100%, 50%),
-          hsl(300, 100%, 50%),
-          hsl(360, 100%, 50%)
+          hsl(240, 100%, 50%)
         );
       }
 
@@ -229,7 +230,7 @@
         <!-- scene select drop down -->
         <div class="scene-dropdown">
           <select id="sceneSelect" class="dropdown-select">
-            <option value="default" selected>Volume</option>
+            <option value="default">Volume</option>
             <option value="pointCloud">Points</option>
           </select>
         </div>
