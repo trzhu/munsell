@@ -92,23 +92,24 @@ function initUI() {
   circularHueSlider.onChange = (range) => {
     // todo: slider
     slicer.setHueRange(range.start, range.end);
-
     // todo: change chroma slicer's colours on change as well
   };
+  circularHueSlider.onChange(circularHueSlider.getHueRange());
 
-  // Initialize two-handle linear chroma slider
-  const chromaSlider = new TwoHandleSlider("chroma-slider", 0, 20, 10, 15);
+  // two-handle linear value slider
+  const valueSlider = new TwoHandleSlider("value-slider", 0, 10);
+  valueSlider.onChange = (range) => {
+    slicer.setValueRange(range.start, range.end);
+    // todo: change chroma slicer's colours on change as well
+  };
+  valueSlider.onChange(valueSlider.getValues());
+
+  // two-handle linear chroma slider
+  const chromaSlider = new TwoHandleSlider("chroma-slider", 0, 38);
   chromaSlider.onChange = (range) => {
-    // todo: slider
     slicer.setChromaRange(range.start, range.end);
   };
-
-  // Initialize two-handle linear value slider
-  const valueSlider = new TwoHandleSlider("value-slider", 0, 30, 5, 25);
-  valueSlider.onChange = (range) => {
-    // todo: slicer
-    slicer.setValueRange(range.start, range.end);
-  };
+  chromaSlider.onChange(chromaSlider.getValues());
 
   const sceneSelect = document.getElementById("sceneSelect");
 
@@ -149,6 +150,66 @@ function switchScene(sceneKey) {
 // TODO: yeah this whole thing is getting rewritten
 class Slicer {
   constructor() {
+    this.uniforms = {
+      hueMin: { value: 0.0 },
+      hueMax: { value: 360.0 },
+      chromaMin: { value: 0.0 },
+      chromaMax: { value: 38.0 },
+      valueMin: { value: 0.0 },
+      valueMax: { value: 10.0 },
+      uSize: {value: 10.0}
+    };
+
+    this.shadersPromise = this.loadShaders();
+  }
+
+  async loadShaders() {
+    const [meshVertex, meshFragment, pointsVertex, pointsFragment] =
+      await Promise.all([
+        fetch("./shaders/mesh_vertex.glsl").then((r) => r.text()),
+        fetch("./shaders/mesh_fragment.glsl").then((r) => r.text()),
+        fetch("./shaders/points_vertex.glsl").then((r) => r.text()),
+        fetch("./shaders/points_fragment.glsl").then((r) => r.text()),
+      ]);
+
+    return { meshVertex, meshFragment, pointsVertex, pointsFragment };
+  }
+
+  async getMaterial(type = "points") {
+    const shaders = await this.shadersPromise;
+
+    let vertexShader, fragmentShader;
+    if (type === "points") {
+      vertexShader = shaders.pointsVertex;
+      fragmentShader = shaders.pointsFragment;
+    } else if (type === "mesh") {
+      vertexShader = shaders.meshVertex;
+      fragmentShader = shaders.meshFragment;
+    } else {
+      throw new Error(`Unsupported type: ${type}`);
+    }
+
+    return new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: this.uniforms,
+      transparent: true,
+    });
+  }
+
+  setHueRange(min, max) {
+    this.uniforms.hueMin.value = min;
+    this.uniforms.hueMax.value = max;
+  }
+
+  setChromaRange(min, max) {
+    this.uniforms.chromaMin.value = min;
+    this.uniforms.chromaMax.value = max;
+  }
+
+  setValueRange(min, max) {
+    this.uniforms.valueMin.value = min;
+    this.uniforms.valueMax.value = max;
   }
 }
 
@@ -393,6 +454,118 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 
+// custom ply loader that can read hue, value, chroma properly
+async function loadCustomPLY(url) {
+  const response = await fetch(url);
+  const text = await response.text();
+  
+  const lines = text.split('\n');
+  let headerEndIndex = -1;
+  let vertexCount = 0;
+  let faceCount = 0;
+  let vertexProperties = [];
+  
+  // Parse header
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === 'end_header') {
+      headerEndIndex = i;
+      break;
+    }
+    if (line.startsWith('element vertex')) {
+      vertexCount = parseInt(line.split(' ')[2]);
+    }
+    if (line.startsWith('element face')) {
+      faceCount = parseInt(line.split(' ')[2]);
+    }
+    if (line.startsWith('property') && !line.includes('list')) {
+      const parts = line.split(' ');
+      vertexProperties.push({
+        type: parts[1],
+        name: parts[2]
+      });
+    }
+  }
+  
+  // console.log(`Loading PLY: ${vertexCount} vertices, ${faceCount} faces`);
+  // console.log('Vertex properties:', vertexProperties.map(p => p.name));
+  
+  // Parse vertex data
+  const positions = [];
+  const colors = [];
+  const hues = [];
+  const values = [];
+  const chromas = [];
+  const isClipped = [];
+  
+  for (let i = headerEndIndex + 1; i < headerEndIndex + 1 + vertexCount; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    const values_line = line.split(' ');
+    
+    // Parse based on your PLY structure: x, y, z, r, g, b, hue, value, chroma, is_clipped
+    positions.push(
+      parseFloat(values_line[0]), 
+      parseFloat(values_line[1]), 
+      parseFloat(values_line[2])
+    );
+    
+    colors.push(
+      parseInt(values_line[3]) / 255, 
+      parseInt(values_line[4]) / 255, 
+      parseInt(values_line[5]) / 255
+    );
+    
+    hues.push(parseFloat(values_line[6]));
+    values.push(parseFloat(values_line[7]));
+    chromas.push(parseFloat(values_line[8]));
+    isClipped.push(parseInt(values_line[9]));
+  }
+  
+  // Parse face data
+  const indices = [];
+  const faceStartIndex = headerEndIndex + 1 + vertexCount;
+  
+  for (let i = faceStartIndex; i < faceStartIndex + faceCount && i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || !lines[i]) continue;
+    
+    const face_data = line.split(' ').map(v => parseInt(v));
+    const vertexCount = face_data[0];
+    
+    if (vertexCount === 3) {
+      // Triangle
+      indices.push(face_data[1], face_data[2], face_data[3]);
+    } else if (vertexCount === 4) {
+      // Quad - split into two triangles
+      indices.push(
+        face_data[1], face_data[2], face_data[3],
+        face_data[1], face_data[3], face_data[4]
+      );
+    }
+  }
+  
+  // Create geometry
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geometry.setAttribute('hue', new THREE.BufferAttribute(new Float32Array(hues), 1));
+  geometry.setAttribute('value', new THREE.BufferAttribute(new Float32Array(values), 1));
+  geometry.setAttribute('chroma', new THREE.BufferAttribute(new Float32Array(chromas), 1));
+  geometry.setAttribute('isClipped', new THREE.BufferAttribute(new Float32Array(isClipped), 1));
+  
+  if (indices.length > 0) {
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+  }
+  
+  // console.log(`Loaded: ${positions.length/3} vertices, ${indices.length/3} faces`);
+  
+  return geometry;
+}
+
+
 // Generalized mesh loader
 function loadMeshes() {
   const meshConfigs = [
@@ -401,10 +574,7 @@ function loadMeshes() {
       name: "shell",
       type: "mesh",
       materials: {
-        lit: () =>
-          new THREE.MeshStandardMaterial({
-            vertexColors: true,
-          }),
+        lit: async () => await slicer.getMaterial("mesh"),
         unlit: () =>
           new THREE.MeshBasicMaterial({
             vertexColors: true,
@@ -420,6 +590,7 @@ function loadMeshes() {
       },
     },
     // interpolated point cloud
+    // tbh this should never get shown
     {
       file: "./munsell_pointcloud.ply",
       name: "pointcloud_interpolated",
@@ -442,27 +613,31 @@ function loadMeshes() {
       name: "pointcloud_original",
       type: "points",
       materials: {
-        points: () =>
-          new THREE.PointsMaterial({
-            vertexColors: true,
-            size: 4,
-          }),
+        points: async () => await slicer.getMaterial("points"),
       },
-      // no post-process for original point cloud
+      postProcess: (geometry, meshObj) => {
+        console.log('Material type:', meshObj.materials.points.type);
+        console.log('Material uniforms:', meshObj.materials.points.uniforms);
+        // no post-process for original point cloud
+      },
     },
   ];
 
-  const loader = new PLYLoader();
+  // const loader = new PLYLoader();
   let loadedCount = 0;
   const totalMeshes = meshConfigs.length;
 
   meshConfigs.forEach((config) => {
-    loader.load(config.file, (geometry) => {
+    loadCustomPLY(config.file).then(async (geometry) => {
       // Create materials
       const materials = {};
-      Object.entries(config.materials).forEach(([key, materialFactory]) => {
-        materials[key] = materialFactory();
-      });
+      for (const [key, materialFactory] of Object.entries(config.materials)) {
+        materials[key] = await materialFactory();
+        
+        console.log('Creating material:', key);
+        const material = await materialFactory();
+        console.log('Material created:', material.type);
+      }
 
       // Create Three.js object
       let threejsObject;
@@ -541,27 +716,6 @@ function centerCamera(object, scale = 1, offset = 0.167) {
   controls.update();
 }
 
-// Initialize shaders and slicing
-async function initializeSlicing() {
-  try {
-    await slicer.loadShaders();
-    console.log('Shaders loaded successfully');
-    
-    // Set up default cut face visualization
-    slicer.setCutFaceVisualization(
-      0.15,  // tolerance - how close to boundary
-      8.0,   // cut face point size
-      2.0    // normal point size
-    );
-    
-    // Set cut face color to a subtle highlight
-    slicer.setCutFaceColor(new THREE.Color(1, 0.9, 0.9), 0.9);
-    
-  } catch (error) {
-    console.error('Failed to load shaders:', error);
-  }
-}
-
 // animate
 function animate() {
   requestAnimationFrame(animate);
@@ -576,11 +730,10 @@ function animate() {
   controls.update();
 }
 
-
 function main() {
   initScene();
+  slicer = new Slicer();
   loadMeshes();
-  // slicer = new Slicer();
 
   initUI();
   resize();
