@@ -17,13 +17,21 @@ void main() {
         discard;
     }
 
-    // todo: fix value wraparound
-    if(vHue < hueMin || vHue > hueMax ||
+    // Handle hue wraparound
+    bool hueInRange;
+    if(hueMin < hueMax) {
+        hueInRange = (vHue >= hueMin && vHue <= hueMax);
+    } else {
+    // hue wraparound when hueMin > huemax
+        hueInRange = (vHue >= hueMin || vHue <= hueMax);
+    }
+
+    if(!hueInRange ||
         vChroma < chromaMin || vChroma > chromaMax ||
         vValue < valueMin || vValue > valueMax) {
         discard;
     }
 
-    // rgb colour from the frag file
+    // rgb colour from the ply file
     gl_FragColor = vec4(vColor, 1.0);
 }

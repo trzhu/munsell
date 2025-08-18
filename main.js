@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "OrbitControls";
-import { PLYLoader } from "PLYLoader";
+// import { PLYLoader } from "PLYLoader";
 
 // globals
 let scene, camera, renderer, controls;
@@ -99,7 +99,7 @@ function initUI() {
   const valueSlider = new TwoHandleSlider("value-slider", 0, 10);
   valueSlider.onChange = (range) => {
     slicer.setValueRange(range.start, range.end);
-    // todo: change hue and chroma slider's colours on change as well
+    // todo: change chroma slider's colours on change as well
   };
   valueSlider.onChange(valueSlider.getValues());
 
@@ -146,7 +146,6 @@ function switchScene(sceneKey) {
   }
 }
 
-// TODO: yeah this whole thing is getting rewritten
 class Slicer {
   constructor() {
     this.uniforms = {
@@ -224,7 +223,7 @@ class CircularSlider {
     this.radius = 90;
 
     this.angle1 = 0;
-    this.angle2 = 60;
+    this.angle2 = 360;
 
     this.isDragging = false;
     this.activeHandle = null;
@@ -325,7 +324,18 @@ class CircularSlider {
 
     // Calculate the arc span
     let arcSpan = this.angle2 - this.angle1;
-    if (arcSpan < 0) arcSpan += 360; // Handle wraparound
+    // Handle wraparound. wraparound if the handles are on top of each other too
+    if (arcSpan <= 0) arcSpan += 360;
+
+    // draw full circle if the handles are on top of each other
+    if (arcSpan === 360) {
+      const pathData_inner = `M ${centerX - inner_radius} ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${centerX + inner_radius} ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${centerX - inner_radius} ${centerY}`;
+      const pathData_outer = `M ${centerX - outer_radius} ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${centerX + outer_radius} ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${centerX - outer_radius} ${centerY}`;
+
+      document.getElementById("arc-path-inner").setAttribute("d", pathData_inner);
+      document.getElementById("arc-path-outer").setAttribute("d", pathData_outer);
+      return;
+    }
 
     // Determine if it's a large arc (>180 degrees)
     const largeArc = arcSpan > 180 ? 1 : 0;
@@ -498,12 +508,13 @@ async function loadCustomPLY(url) {
   const isClipped = [];
   
   for (let i = headerEndIndex + 1; i < headerEndIndex + 1 + vertexCount; i++) {
+    if (!lines[i]) continue; // skips empty lines etc
     const line = lines[i].trim();
     if (!line) continue;
     
     const values_line = line.split(' ');
     
-    // Parse based on your PLY structure: x, y, z, r, g, b, hue, value, chroma, is_clipped
+    // PLY structure: x, y, z, r, g, b, hue, value, chroma, is_clipped
     positions.push(
       parseFloat(values_line[0]), 
       parseFloat(values_line[1]), 
@@ -626,10 +637,6 @@ function loadMeshes() {
       const materials = {};
       for (const [key, materialFactory] of Object.entries(config.materials)) {
         materials[key] = await materialFactory();
-        
-        console.log('Creating material:', key);
-        const material = await materialFactory();
-        console.log('Material created:', material.type);
       }
 
       // Create Three.js object
