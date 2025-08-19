@@ -172,14 +172,6 @@
         background: linear-gradient(to right, black, white);
       }
 
-      /* .range {
-        position: absolute;
-        height: 6px;
-        top: 7px;
-        background: rgba(255, 255, 255, 0);
-        border-radius: 3px;
-      } */
-
       .handle {
         position: absolute;
         width: 12px;
@@ -232,11 +224,16 @@
           <select id="sceneSelect" class="dropdown-select">
             <option value="default">Volume</option>
             <option value="pointCloud">Points</option>
+            <!-- temp debug -->
+            <!-- <option value="debug">debug</option> -->
           </select>
         </div>
 
         <!-- toggle lighting button -->
         <button id="toggle-light">Turn on Lighting</button>
+
+        <!-- toggle rgb button -->
+        <button id="toggle-rgb" style="display:none">Clip to RGB limits</button>
 
         <!-- collapsible HVC sliders -->
         <details open>

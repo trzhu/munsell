@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { OrbitControls } from "OrbitControls";
-// import { PLYLoader } from "PLYLoader";
 
 // globals
 let scene, camera, renderer, controls;
@@ -86,6 +85,16 @@ function initUI() {
     }
   });
 
+  const toggleRGBButton = document.getElementById("toggle-rgb");
+  toggleRGBButton.addEventListener("click", () => {
+    slicer.toggleRGB();
+    if (slicer.uniforms.showOutsideRGB.value > 0.5) {
+      toggleRGBButton.textContent = "Clip to RGB limits";
+    } else {
+      toggleRGBButton.textContent = "Show all colours";
+    }
+  });
+
   // Initialize circular hue slider
   const circularHueSlider = new CircularSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
@@ -110,11 +119,11 @@ function initUI() {
   chromaSlider.onChange(chromaSlider.getValues());
 
   const sceneSelect = document.getElementById("sceneSelect");
-
   sceneSelect.addEventListener("change", (event) => {
-    const selectedScene = event.target.value;
-    switchScene(selectedScene);
+    switchScene(event.target.value);
   });
+
+  switchScene(sceneSelect.value);
 }
 
 // Scene switching function
@@ -137,11 +146,18 @@ function switchScene(sceneKey) {
     }
   });
 
+  // todo: consolidate these into one button
+
   const toggleLightButton = document.getElementById("toggle-light");
+  const toggleRGBButton = document.getElementById("toggle-rgb");
+
   if (sceneKey === "default") {
     toggleLightButton.style.display = "block";
-  } else {
+    toggleRGBButton.style.display = "none";
+  } else if (sceneKey === "pointCloud") {
     toggleLightButton.style.display = "none";
+    toggleRGBButton.style.display = "block";
+    
   }
 }
 
@@ -163,15 +179,18 @@ class Slicer {
   }
 
   async loadShaders() {
-    const [meshVertex, meshFragment, pointsVertex, pointsFragment] =
+    const [meshVertex, meshFragment, pointsVertex, pointsFragment, sliceVertex, sliceFragment] =
       await Promise.all([
         fetch("./shaders/mesh_vertex.glsl").then((r) => r.text()),
         fetch("./shaders/mesh_fragment.glsl").then((r) => r.text()),
         fetch("./shaders/points_vertex.glsl").then((r) => r.text()),
         fetch("./shaders/points_fragment.glsl").then((r) => r.text()),
+        fetch("./shaders/slice_vertex.glsl").then((r) => r.text()),
+        fetch("./shaders/slice_fragment.glsl").then((r) => r.text()),
+        
       ]);
 
-    return { meshVertex, meshFragment, pointsVertex, pointsFragment };
+    return { meshVertex, meshFragment, pointsVertex, pointsFragment, sliceVertex, sliceFragment };
   }
 
   async getMaterial(type = "points") {
@@ -184,6 +203,15 @@ class Slicer {
     } else if (type === "mesh") {
       vertexShader = shaders.meshVertex;
       fragmentShader = shaders.meshFragment;
+    } else if (type === "slice") {
+      return new THREE.ShaderMaterial({
+        vertexShader: shaders.sliceVertex,
+        fragmentShader: shaders.sliceFragment,
+        side: THREE.DoubleSide,
+        transparent: false,
+        depthTest: true,
+        depthWrite: true,
+      });
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -593,10 +621,7 @@ function loadMeshes() {
       type: "mesh",
       materials: {
         mesh: async() => await slicer.getMaterial("mesh")
-      },
-      postProcess: (geometry, meshObj) => {
-        // TODO maybe i should delete these bc im not using them
-      },
+      }
     },
     // interpolated point cloud
     // tbh this should never get shown
@@ -605,13 +630,8 @@ function loadMeshes() {
       name: "pointcloud_interpolated",
       type: "points",
       materials: {
-        // TODO: change to a new invisble points shader later
-        points: async () => await slicer.getMaterial("points"),
-      },
-      postProcess: (geometry, meshObj) => {
-        // Apply custom shader for slicing
-        // slicer.applyToPointMaterial(meshObj.materials.points);
-      },
+        points: async () => await slicer.getMaterial("slice"),
+      }
     },
     // raw real.dat data points
     {
@@ -620,10 +640,7 @@ function loadMeshes() {
       type: "points",
       materials: {
         points: async () => await slicer.getMaterial("points"),
-      },
-      postProcess: (geometry, meshObj) => {
-        // no post-process for original point cloud
-      },
+      }
     },
   ];
 
@@ -657,11 +674,6 @@ function loadMeshes() {
         mesh: threejsObject,
         config,
       };
-
-      // Run post-processing
-      if (config.postProcess) {
-        config.postProcess(geometry, meshObj);
-      }
 
       scene.add(threejsObject);
       meshes[config.name] = meshObj;
@@ -724,10 +736,6 @@ function animate() {
       meshes[m].mesh.rotation.y += 0.01;
     }
   }
-
-  document.getElementById('debug').innerHTML = meshes.shell?.mesh.material.uniforms ? 
-        `H:${meshes.shell.mesh.material.uniforms.hueMin.value.toFixed(0)}-${meshes.shell.mesh.material.uniforms.hueMax.value.toFixed(0)} V:${meshes.shell.mesh.material.uniforms.valueMin.value.toFixed(1)}-${meshes.shell.mesh.material.uniforms.valueMax.value.toFixed(1)} C:${meshes.shell.mesh.material.uniforms.chromaMin.value.toFixed(1)}-${meshes.shell.mesh.material.uniforms.chromaMax.value.toFixed(1)} ` : 
-        'Loading...';
 
   renderer.render(scene, camera);
 
