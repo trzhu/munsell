@@ -10,8 +10,6 @@ let isPaused = false;
 const meshes = {}; // dictionary of meshes
 // keys: "shell", "pointcloud", "pointcloud_original"
 
-// let litMaterial, unlitMaterial;
-
 // Scene configurations
 const sceneConfigs = {
   default: {
@@ -24,6 +22,11 @@ const sceneConfigs = {
     visible: ["pointcloud_original"],
     hidden: ["shell", "pointcloud_interpolated"],
   },
+  debug: {
+    name: "Debug",
+    visible: ["pointcloud_interpolated"],
+    hidden: ["shell", "pointcloud_original"]
+  }
 };
 
 // init scene + camera + lights
@@ -75,16 +78,12 @@ function initUI() {
   // lighting toggle button
   const toggleLightButton = document.getElementById("toggle-light");
   toggleLightButton.addEventListener("click", () => {
-    // if (meshes["shell"]) {
-    //   const shellMesh = meshes["shell"].mesh;
-    //   if (shellMesh.material === litMaterial) {
-    //     shellMesh.material = unlitMaterial;
-    //     toggleLightButton.textContent = "Turn on Lighting";
-    //   } else {
-    //     shellMesh.material = litMaterial;
-    //     toggleLightButton.textContent = "Show Exact Color";
-    //   }
-    // }
+    slicer.toggleLighting();
+    if (slicer.uniforms.useLighting.value < 0.5) {
+      toggleLightButton.textContent = "Turn on Lighting";
+    } else {
+      toggleLightButton.textContent = "Show Exact Color";
+    }
   });
 
   // Initialize circular hue slider
@@ -150,12 +149,14 @@ class Slicer {
   constructor() {
     this.uniforms = {
       hueMin: { value: 0.0 },
-      hueMax: { value: 360.0 },
+      hueMax: { value: 2 * Math.PI },
       chromaMin: { value: 0.0 },
       chromaMax: { value: 38.0 },
       valueMin: { value: 0.0 },
       valueMax: { value: 10.0 },
-      uSize: {value: 10.0}
+      uSize: {value: 10.0},
+      useLighting: {value: 0.0},
+      showOutsideRGB: {value: 1.0}
     };
 
     this.shadersPromise = this.loadShaders();
@@ -196,8 +197,8 @@ class Slicer {
   }
 
   setHueRange(min, max) {
-    this.uniforms.hueMin.value = min;
-    this.uniforms.hueMax.value = max;
+    this.uniforms.hueMin.value = min * Math.PI / 180;
+    this.uniforms.hueMax.value = max * Math.PI / 180;
   }
 
   setChromaRange(min, max) {
@@ -208,6 +209,15 @@ class Slicer {
   setValueRange(min, max) {
     this.uniforms.valueMin.value = min;
     this.uniforms.valueMax.value = max;
+  }
+
+  toggleLighting() {
+    this.uniforms.useLighting.value = 1 - this.uniforms.useLighting.value;
+  }
+
+  // todo hook this up to a button
+  toggleRGB() {
+    this.uniforms.showOutsideRGB.value = 1 - this.uniforms.showOutsideRGB.value;
   }
 }
 
@@ -585,7 +595,7 @@ function loadMeshes() {
         mesh: async() => await slicer.getMaterial("mesh")
       },
       postProcess: (geometry, meshObj) => {
-        // maybe i should delete these bc im not using them
+        // TODO maybe i should delete these bc im not using them
       },
     },
     // interpolated point cloud
@@ -595,6 +605,7 @@ function loadMeshes() {
       name: "pointcloud_interpolated",
       type: "points",
       materials: {
+        // TODO: change to a new invisble points shader later
         points: async () => await slicer.getMaterial("points"),
       },
       postProcess: (geometry, meshObj) => {
@@ -713,6 +724,10 @@ function animate() {
       meshes[m].mesh.rotation.y += 0.01;
     }
   }
+
+  document.getElementById('debug').innerHTML = meshes.shell?.mesh.material.uniforms ? 
+        `H:${meshes.shell.mesh.material.uniforms.hueMin.value.toFixed(0)}-${meshes.shell.mesh.material.uniforms.hueMax.value.toFixed(0)} V:${meshes.shell.mesh.material.uniforms.valueMin.value.toFixed(1)}-${meshes.shell.mesh.material.uniforms.valueMax.value.toFixed(1)} C:${meshes.shell.mesh.material.uniforms.chromaMin.value.toFixed(1)}-${meshes.shell.mesh.material.uniforms.chromaMax.value.toFixed(1)} ` : 
+        'Loading...';
 
   renderer.render(scene, camera);
 

@@ -1,37 +1,49 @@
 precision mediump float;
 varying vec3 vColor;
 varying vec3 vNormal;
-varying float vHue;
-varying float vChroma;
-varying float vValue;
+varying vec3 vPosition3D;  // xyz coordinates
+
 uniform float hueMin;
 uniform float hueMax;
 uniform float chromaMin;
 uniform float chromaMax;
 uniform float valueMin;
 uniform float valueMax;
+uniform float useLighting;
+uniform float showOutsideRGB;
 
 void main() {
-  // Filter by ranges - discard fragments outside bounds (backup safety)
-  bool hueInRange;
-  if (hueMin <= hueMax) {
-    hueInRange = (vHue >= hueMin && vHue <= hueMax);
-  } else {
-    hueInRange = (vHue >= hueMin || vHue <= hueMax);
-  }
-  
-  if (!hueInRange ||
-      vChroma < chromaMin || vChroma > chromaMax ||
-      vValue < valueMin || vValue > valueMax) {
-    discard;
-  }
-  
-  // Simple diffuse lighting calculation
-  vec3 lightDirection = normalize(vec3(1.0, 1.0, 1.0));
-  float lightIntensity = max(dot(normalize(vNormal), lightDirection), 0.3);
-  
-  // Apply lighting to the vertex color from PLY
-  vec3 litColor = vColor * lightIntensity;
-  
-  gl_FragColor = vec4(litColor, 1.0);
+    bool positionInRange;
+   
+    if(vPosition3D.x == 0.0 && vPosition3D.z == 0.0) {
+        positionInRange = true;  // always include grayscale (center axis)
+    } else {
+        // calculate angle from 3D position
+        float angle = atan(vPosition3D.z, vPosition3D.x);
+        if(angle < 0.0) angle += 2.0 * 3.14159;  // Normalize to [0, 2π]
+       
+        if(hueMin < hueMax) {
+            positionInRange = (angle >= hueMin && angle <= hueMax);
+        } else {
+            positionInRange = (angle >= hueMin || angle <= hueMax);
+        }
+    }
+   
+    if(!positionInRange ||
+        length(vec2(vPosition3D.x, vPosition3D.z)) < chromaMin ||
+        length(vec2(vPosition3D.x, vPosition3D.z)) > chromaMax ||
+        vPosition3D.y < valueMin || vPosition3D.y > valueMax) {
+        discard;
+    }
+
+    vec3 finalColor;
+    if(useLighting > 0.5) {
+        // diffuse lighting
+        vec3 lightDirection = normalize(vec3(1.0, 1.0, 1.0));
+        float lightIntensity = max(dot(normalize(vNormal), lightDirection), 0.3);
+        finalColor = vColor * lightIntensity;
+    } else {
+        finalColor = vColor;
+    }
+    gl_FragColor = vec4(finalColor, 1.0);
 }
