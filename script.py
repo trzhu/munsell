@@ -51,7 +51,8 @@ def Lab_to_sRGB(lab):
     sRGB_clipped = np.clip(sRGB, 0, 1)
     is_clipped = np.any(sRGB != sRGB_clipped, axis = 1)
     
-    return sRGB_clipped, is_clipped
+    # because is_clipped is an np array
+    return sRGB_clipped, is_clipped.item()
 
 # adds Lab and RGB conversions to the dataframe
 # also adds grayscale points to each value plate by avging luminosity
@@ -223,6 +224,8 @@ def to_mesh(df_3d):
 #   80+ hue steps
 #   20-30+ value steps
 #   30+ chroma steps
+
+# TODO: values interpolated near the caps sometimes have the wrong value for hue
 def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     """
     hue_steps : int
@@ -240,6 +243,19 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     df = df.copy()
     df["is_original"] = True
     
+    df, max_chroma = interpolate_chroma(df, chroma_steps)
+    
+    df = interpolate_value(df, value_steps)
+    
+    df = interpolate_hue(df, hue_steps)
+    
+    # df = interpolate_edges(df, df_all, max_chroma)
+    
+    return df
+
+# interpolate radially, in cylindrical shells
+# returns df + max chroma at each point
+def interpolate_chroma(df, chroma_steps = 3):
     # this section duplicates grays so that each hue slice can have its own gray
     # helps with radial interpolation
     grays = df[df["Chroma"] == 0]
@@ -292,9 +308,11 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     df = df[~((df["Chroma"] == 0) & (df["HueDeg"] != 0))].reset_index(drop=True)
     
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
-    all_points = []
-    
-    # interpolate vertically, between Value "plates"
+    return df, max_chroma
+
+# interpolate vertically, between Value "plates"
+def interpolate_value(df, value_steps):
+    all_points = [] 
     for (chroma, hue), group in df.groupby(["Chroma", "HueDeg"]):
         group = group.sort_values("Value")
         value_pts = group[["Value", "L*", "a*", "b*"]].to_numpy()
@@ -319,9 +337,12 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
                 })
 
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
+    return df
+
+
+# interpolate circumferentially, between hues, within each Value "plate"
+def interpolate_hue(df, hue_steps):
     all_points = []
-    
-    # interpolate circumferentially, between hues, within each Value "plate" (horizontal slice)
     for (value, chroma), group in df.groupby(["Value", "Chroma"]):
         
         # skip grayscale or groups with only one vertex
@@ -364,7 +385,9 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
                 })
     
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
+    return df
 
+def interpolate_edges(df, df_all, max_chroma):
     # after simple interpolation, detect which new spokes need extension based on their neighbours
     extension_points = []
     
@@ -499,9 +522,6 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
                 "is_clipped": False,
             })
             
-        
-        
-            
     df = pd.concat([df, pd.DataFrame(extension_points)], ignore_index=True)
     return df
 
@@ -556,10 +576,10 @@ def write_ply(vertices, faces, filename):
             g_byte = int(g * 255)
             b_byte = int(b * 255)
             # csv may or may not preserve types, so it could be a bool or a string lol
-            if isinstance(is_clipped, bool):
-                is_clipped_byte = int(is_clipped)
-            else:
-                is_clipped_byte = int(str(is_clipped).strip().lower() == "true")
+            # if isinstance(is_clipped, bool):
+            #     is_clipped_byte = int(is_clipped)
+            # else:
+            is_clipped_byte = int(str(is_clipped).strip().lower() == "true")
             f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte} {h} {v} {c} {is_clipped_byte}\n")
 
         for face in faces:
