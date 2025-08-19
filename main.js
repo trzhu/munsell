@@ -10,7 +10,7 @@ let isPaused = false;
 const meshes = {}; // dictionary of meshes
 // keys: "shell", "pointcloud", "pointcloud_original"
 
-let litMaterial, unlitMaterial;
+// let litMaterial, unlitMaterial;
 
 // Scene configurations
 const sceneConfigs = {
@@ -75,16 +75,16 @@ function initUI() {
   // lighting toggle button
   const toggleLightButton = document.getElementById("toggle-light");
   toggleLightButton.addEventListener("click", () => {
-    if (meshes["shell"]) {
-      const shellMesh = meshes["shell"].mesh;
-      if (shellMesh.material === litMaterial) {
-        shellMesh.material = unlitMaterial;
-        toggleLightButton.textContent = "Turn on Lighting";
-      } else {
-        shellMesh.material = litMaterial;
-        toggleLightButton.textContent = "Show Exact Color";
-      }
-    }
+    // if (meshes["shell"]) {
+    //   const shellMesh = meshes["shell"].mesh;
+    //   if (shellMesh.material === litMaterial) {
+    //     shellMesh.material = unlitMaterial;
+    //     toggleLightButton.textContent = "Turn on Lighting";
+    //   } else {
+    //     shellMesh.material = litMaterial;
+    //     toggleLightButton.textContent = "Show Exact Color";
+    //   }
+    // }
   });
 
   // Initialize circular hue slider
@@ -513,7 +513,7 @@ async function loadCustomPLY(url) {
     if (!line) continue;
     
     const values_line = line.split(' ');
-    
+
     // PLY structure: x, y, z, r, g, b, hue, value, chroma, is_clipped
     positions.push(
       parseFloat(values_line[0]), 
@@ -570,8 +570,6 @@ async function loadCustomPLY(url) {
     geometry.computeVertexNormals();
   }
   
-  // console.log(`Loaded: ${positions.length/3} vertices, ${indices.length/3} faces`);
-  
   return geometry;
 }
 
@@ -584,19 +582,10 @@ function loadMeshes() {
       name: "shell",
       type: "mesh",
       materials: {
-        lit: async () => await slicer.getMaterial("mesh"),
-        unlit: () =>
-          new THREE.MeshBasicMaterial({
-            vertexColors: true,
-          }),
+        mesh: async() => await slicer.getMaterial("mesh")
       },
       postProcess: (geometry, meshObj) => {
-        geometry.computeVertexNormals();
-
-        // TODO: APPLY SLICING to mesh
-
-        litMaterial = meshObj.materials.lit;
-        unlitMaterial = meshObj.materials.unlit;
+        // maybe i should delete these bc im not using them
       },
     },
     // interpolated point cloud
@@ -644,7 +633,7 @@ function loadMeshes() {
       if (config.type === "mesh") {
         threejsObject = new THREE.Mesh(
           geometry,
-          materials.unlit || materials.lit
+          materials.mesh   
         );
       } else if (config.type === "points") {
         threejsObject = new THREE.Points(geometry, materials.points);
