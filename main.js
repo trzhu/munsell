@@ -28,6 +28,8 @@ const sceneConfigs = {
   }
 };
 
+
+
 // init scene + camera + lights
 function initScene() {
   // scene
@@ -94,12 +96,12 @@ function initUI() {
       toggleRGBButton.textContent = "Show all colours";
     }
   });
-
-  // Initialize circular hue slider
+  
+  /********** SLIDERS ************/
+  // circular hue slider
   const circularHueSlider = new CircularSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
     slicer.setHueRange(range.start, range.end);
-    // todo: change chroma slider's colours on change as well
   };
   circularHueSlider.onChange(circularHueSlider.getHueRange());
 
@@ -107,7 +109,6 @@ function initUI() {
   const valueSlider = new TwoHandleSlider("value-slider", 0, 10);
   valueSlider.onChange = (range) => {
     slicer.setValueRange(range.start, range.end);
-    // todo: change chroma slider's colours on change as well
   };
   valueSlider.onChange(valueSlider.getValues());
 
@@ -116,8 +117,11 @@ function initUI() {
   chromaSlider.onChange = (range) => {
     slicer.setChromaRange(range.start, range.end);
   };
+  // idk initalize it to some random colors
+  chromaSlider.setGradient("#808080", "#ff9b00")
   chromaSlider.onChange(chromaSlider.getValues());
 
+  // set scene
   const sceneSelect = document.getElementById("sceneSelect");
   sceneSelect.addEventListener("change", (event) => {
     switchScene(event.target.value);
@@ -145,8 +149,6 @@ function switchScene(sceneKey) {
       meshes[meshName].mesh.visible = true;
     }
   });
-
-  // todo: consolidate these into one button
 
   const toggleLightButton = document.getElementById("toggle-light");
   const toggleRGBButton = document.getElementById("toggle-rgb");
@@ -367,11 +369,27 @@ class CircularSlider {
 
     // draw full circle if the handles are on top of each other
     if (arcSpan === 360) {
-      const pathData_inner = `M ${centerX - inner_radius} ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${centerX + inner_radius} ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${centerX - inner_radius} ${centerY}`;
-      const pathData_outer = `M ${centerX - outer_radius} ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${centerX + outer_radius} ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${centerX - outer_radius} ${centerY}`;
+      const pathData_inner = `M ${
+        centerX - inner_radius
+      } ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${
+        centerX + inner_radius
+      } ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${
+        centerX - inner_radius
+      } ${centerY}`;
+      const pathData_outer = `M ${
+        centerX - outer_radius
+      } ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${
+        centerX + outer_radius
+      } ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${
+        centerX - outer_radius
+      } ${centerY}`;
 
-      document.getElementById("arc-path-inner").setAttribute("d", pathData_inner);
-      document.getElementById("arc-path-outer").setAttribute("d", pathData_outer);
+      document
+        .getElementById("arc-path-inner")
+        .setAttribute("d", pathData_inner);
+      document
+        .getElementById("arc-path-outer")
+        .setAttribute("d", pathData_outer);
       return;
     }
 
@@ -415,9 +433,14 @@ class TwoHandleSlider {
     this.value1 = min;
     this.value2 = max;
 
+    this.col1 = "#808080";
+    this.col2 = "#ff9b00";
+
     this.isDragging = false;
     this.activeHandle = null;
     this.onChange = null;
+
+    this.lastHandle = null; // handle which was last touched
 
     this.track.style.background = gradientCSS;
     this.init();
@@ -476,10 +499,8 @@ class TwoHandleSlider {
     return { start: this.value1, end: this.value2 };
   }
 
-  setGradient(colors) {
-    if (Array.isArray(colors) && colors.length > 1) {
-      this.track.style.background = `linear-gradient(to right, ${colors.join(", ")})`;
-    }
+  setGradient(col1, col2) {
+    this.track.style.background = `linear-gradient(to right, ${col1}, ${col2})`;
   }
 }
 

@@ -81,15 +81,19 @@
         height: 100%;
         border-radius: 50%;
         position: relative;
-        background: conic-gradient(
-          /* TODO: UPDATE TO USE MUNSELL'S HUE SPACING */ 
-          hsl(240, 100%, 50%),
-          hsl(300, 100%, 50%),
-          hsl(360, 100%, 50%),
-          hsl(60, 100%, 50%),
-          hsl(120, 100%, 50%),
-          hsl(180, 100%, 50%),
-          hsl(240, 100%, 50%)
+        background: conic-gradient( from 90deg,
+          /* 10RP, 10R, 10YR,...*/
+          rgb(219, 0, 86),
+          rgb(230, 58, 0),
+          rgb(255, 185, 0),
+          rgb(216, 209, 0),
+          rgb(0, 243, 0),
+          rgb(0, 162, 112),
+          rgb(0, 182, 211),
+          rgb(0, 140, 244),
+          rgba(114, 0, 216),
+          rgb(224, 0, 202),
+          rgb(219, 0, 86)
         );
       }
 
@@ -233,7 +237,7 @@
         <button id="toggle-light">Turn on Lighting</button>
 
         <!-- toggle rgb button -->
-        <button id="toggle-rgb" style="display:none">Clip to RGB limits</button>
+        <button id="toggle-rgb" style="display: none">Clip to RGB limits</button>
 
         <!-- collapsible HVC sliders -->
         <details open>
