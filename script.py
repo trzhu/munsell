@@ -4,6 +4,7 @@ import re, urllib.request
 from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
 from collections import defaultdict
+from scipy.interpolate import LinearNDInterpolator
 
 # TODO compute a scaling factor that makes the Y axis perceptually uniform?
 Y_SCALE = 3
@@ -52,8 +53,14 @@ def Lab_to_sRGB(lab):
     sRGB_clipped = np.clip(sRGB, 0, 1)
     is_clipped = np.any(sRGB != sRGB_clipped, axis = 1)
     
+    # Handle both single point and array cases
+    if is_clipped.shape == ():  # Single point
+        return sRGB_clipped, is_clipped.item()
+    else:  # Array of points
+        return sRGB_clipped, is_clipped
+    
     # because is_clipped is an np array
-    return sRGB_clipped, is_clipped.item()
+    # return sRGB_clipped, is_clipped.item()
 
 # adds Lab and RGB conversions to the dataframe
 # also adds grayscale points to each value plate by avging luminosity
@@ -216,6 +223,99 @@ def to_mesh(df_3d):
      
     return vertices, faces
 
+# new interpolate using LinearNDInterpolator
+# densities are multiplicative factors
+def interpolate(df, df_all = None, hue_density = 2, value_density=2, chroma_density=2):
+    
+    df = df.copy()
+    df["is_original"] = True
+    df["flagged_to_drop"] = False
+    
+    # gonna add some things to help with the interpolation, they all get flagged to be dropped later
+    augmented = []
+    
+    # duplicate grays so that each hue has its own gray
+    # helps with chroma interpolation
+    grays = df[df["Chroma"] == 0]
+    
+    for _, gray in grays.iterrows():
+        for hue in df["HueDeg"].unique():
+            g = gray.copy()
+            g["HueDeg"] = hue
+            g["flagged_to_drop"] = True
+            augmented.append(g)
+            
+    # duplicate the hue slice at 360 (red), flag it for deletion as well
+    hue_360_slice = df[df["HueDeg"] == 360].copy()
+    hue_360_slice["HueDeg"] = 0
+    hue_360_slice["flagged_to_drop"] = True
+    
+    df_augmented = pd.concat([df, pd.DataFrame(augmented), hue_360_slice], ignore_index=True)
+    
+    points = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
+    
+    # create interpolators for Lab values
+    interp_L = LinearNDInterpolator(points, df_augmented["L*"])
+    interp_a = LinearNDInterpolator(points, df_augmented["a*"])
+    interp_b = LinearNDInterpolator(points, df_augmented["b*"])
+    
+    
+    # TODO: change this to only in-bounds points, rn it's too thicc of a convex hull
+    # Generate denser grid
+    hue_range = np.linspace(df["HueDeg"].min(), df["HueDeg"].max(), 
+                           int(len(df["HueDeg"].unique()) * hue_density))
+    value_range = np.linspace(df["Value"].min(), df["Value"].max(),
+                             int(len(df["Value"].unique()) * value_density))
+    chroma_range = np.linspace(0, df["Chroma"].max(),
+                              int(df["Chroma"].max() * chroma_density))
+    # grid of new points
+    new_points = []
+    for h in hue_range:
+        for v in value_range:
+            for c in chroma_range:
+                new_points.append([h, v, c])
+    
+    new_points = np.array(new_points)
+    
+    # Interpolate Lab values
+    new_L = interp_L(new_points)
+    new_a = interp_a(new_points)
+    new_b = interp_b(new_points)
+    
+    # Filter out NaN results (points outside convex hull)
+    valid_mask = ~(np.isnan(new_L) | np.isnan(new_a) | np.isnan(new_b))
+    
+    # vectorized Lab_to_sRGB conversion
+    valid_points = new_points[valid_mask]
+    valid_L = new_L[valid_mask]
+    valid_a = new_a[valid_mask]
+    valid_b = new_b[valid_mask]
+
+    Lab_array = np.column_stack([valid_L, valid_a, valid_b])
+    sRGB_array, is_clipped_array = Lab_to_sRGB(Lab_array)
+    
+    # build interpolated dataframe
+    interpolated_points = pd.DataFrame({
+        "HueDeg": valid_points[:, 0],
+        "Value": valid_points[:, 1], 
+        "Chroma": valid_points[:, 2],
+        "L*": valid_L,
+        "a*": valid_a,
+        "b*": valid_b,
+        "R": sRGB_array[:, 0],
+        "G": sRGB_array[:, 1],
+        "B": sRGB_array[:, 2],
+        "is_original": False,
+        "is_clipped": is_clipped_array
+    })
+    
+    # remove duplicated points and combine with interpolated data
+    df_cleaned = df[~df["flagged_to_drop"]].drop(columns=["flagged_to_drop"]).reset_index(drop=True)
+    
+    df_result = pd.concat([df_cleaned, pd.DataFrame(interpolated_points)], ignore_index=True)
+    
+    return df_result
+
 # Interpolates the Munsell renotation dataset along each of Hue, Value, Chroma
 # perform the interpolation in CIELAB.
 # original data set has: 
@@ -226,7 +326,7 @@ def to_mesh(df_3d):
 #   80+ hue steps
 #   20-30+ value steps
 #   30+ chroma steps
-def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
+# def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     """
     hue_steps : int
         Number of subdivisions between adjacent hue samples (of the same value and chroma)
@@ -548,95 +648,6 @@ def to_pointcloud(df_3d):
         vertices.append((x, y, z, r, g, b, h, v, c, is_clipped))
     return vertices
 
-# creates mesh with internal geometry
-def to_internal_mesh(df_3d):
-    # create global vertex list
-    vertices = []
-    index_map = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
-    index = 0
-    
-    for _, row in df_3d.iterrows():
-        h, v, c = row["HueDeg"], row["Value"], row["Chroma"]
-        vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], 
-                             row["R"], row["G"], row["B"], 
-                             h,v,c,
-                             row["is_clipped"]))
-        index_map[h][v][c] = index
-        index += 1
-    
-    valid_coords = []
-    for h in index_map:
-        for v in index_map[h]:
-            for c in index_map[h][v]:
-                valid_coords.append((h, v, c))
-                
-    # depends on interpolation density
-    # without interpolation it should be: 9, 1, 2
-    h_step, v_step, c_step = 9, 1, 2
-    
-    
-    # create cylinders between vertices of equal chroma, neighbouring hue/value
-    # create plates between vertices of equal value, neighbouring hue/chroma
-    # create fins between vertices of equal hue, neighbouring value/chroma 
-    faces = []
-    for h, v, c in valid_coords:
-        # TODO: special cases: 
-        # the seam from 360 to 9, 
-        # white/black to top plate, faces touching grayscale
-        curr = index_map[h][v][c]
-        
-        h_next = (h + h_step) % 360
-        v_next = v + v_step
-        c_next = c + c_step
-        
-        # Get neighbor indices (None if they don't exist)
-        h_neighbor = index_map[h_next][v][c]
-        v_neighbor = index_map[h][v_next][c]  
-        c_neighbor = index_map[h][v][c_next]
-        
-        hv_neighbor = index_map[h_next][v_next][c]
-        hc_neighbor = index_map[h_next][v][c_next]
-        vc_neighbor = index_map[h][v_next][c_next]
-        
-        # hue/value face, constant chroma
-        if h_neighbor is not None and v_neighbor is not None and hv_neighbor is not None:
-            # create 2 triangles that make a quad across this face
-            faces.append((curr, h_neighbor, hv_neighbor))
-            faces.append((curr, hv_neighbor, v_neighbor))
-        # if only 3 of the points exist, just make a triangle with those
-        elif h_neighbor is not None and v_neighbor is not None:
-            faces.append((curr, h_neighbor, v_neighbor))
-        elif h_neighbor is not None and hv_neighbor is not None:
-            faces.append((curr, h_neighbor, hv_neighbor))
-        elif v_neighbor is not None and hv_neighbor is not None:
-            faces.append((curr, v_neighbor, hv_neighbor))
-        
-        # hue/chroma face, constant value  
-        if h_neighbor is not None and c_neighbor is not None and hc_neighbor is not None:
-            faces.append((curr, h_neighbor, hc_neighbor))
-            faces.append((curr, hc_neighbor, c_neighbor))
-        elif h_neighbor is not None and c_neighbor is not None:
-            faces.append((curr, h_neighbor, c_neighbor))
-        elif h_neighbor is not None and hc_neighbor is not None:
-            faces.append((curr, h_neighbor, hc_neighbor))
-        elif c_neighbor is not None and hc_neighbor is not None:
-            faces.append((curr, c_neighbor, hc_neighbor))
-            
-        # value/chroma face constant hue)
-        if v_neighbor is not None and c_neighbor is not None and vc_neighbor is not None:
-            faces.append((curr, v_neighbor, vc_neighbor))
-            faces.append((curr, vc_neighbor, c_neighbor))
-        elif v_neighbor is not None and c_neighbor is not None:
-            faces.append((curr, v_neighbor, c_neighbor))
-        elif v_neighbor is not None and vc_neighbor is not None:
-            faces.append((curr, v_neighbor, vc_neighbor))
-        elif c_neighbor is not None and vc_neighbor is not None:
-            faces.append((curr, c_neighbor, vc_neighbor))
-    
-    return vertices, faces
-
-
-
 def write_obj(vertices, faces, filename="munsell_mesh.obj"):
     with open(filename, "w") as f:
         for v in vertices:
@@ -718,8 +729,6 @@ def with_interpolation():
     # create a "shell" mesh
     outer_vertices, faces = to_mesh(df_3d)
     write_ply(outer_vertices, faces, "munsell_mesh.ply")
-    
-    print(":)")
 
 # point cloud and mesh with only the original dataset
 def original():
@@ -745,14 +754,24 @@ def original():
     write_ply(outer_vertices, faces, "munsell_mesh.ply")
 
 
-
 def main():
-    df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     
-    vertices, faces = to_internal_mesh(df_3d)
-    write_ply(vertices, faces, "munsell_internalmesh.ply")
+    df_interpolated = interpolate(df_processed)
+    df_interpolated.to_csv("munsell_interpolated.csv", index=False)
+    print("saved to munsell_interpolated.csv")
     
-    # original()
+    df_3d = to_3d_coordinates(df_interpolated)
+    df_3d.to_csv("munsell_3d.csv", index=False)
+    print("saved to munsell_3d.csv")
+    
+    # create a point cloud
+    vertices = to_pointcloud(df_3d)
+    write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
+    
+    # create a "shell" mesh
+    outer_vertices, faces = to_mesh(df_3d)
+    write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
     print(":)")
     
