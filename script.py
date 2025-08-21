@@ -3,6 +3,7 @@ import numpy as np
 import re, urllib.request
 from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
+from collections import defaultdict
 
 # TODO compute a scaling factor that makes the Y axis perceptually uniform?
 Y_SCALE = 3
@@ -146,6 +147,7 @@ def to_3d_coordinates(df):
     return df
 
 # generate 3d mesh defined by the outermost vertices
+# TODO: isnt great with fully interpolated mesh, not sure why rn
 def to_mesh(df_3d):
     # each entry of the dictionary is a df of all points with that Value
     # represents a horizontal "plate", which are stacked to form the space
@@ -211,7 +213,7 @@ def to_mesh(df_3d):
                 # form two triangles (that make 1 quad)
                 faces.append((idx1[i], idx2[i], idx2[i_next]))
                 faces.append((idx1[i], idx2[i_next], idx1[i_next]))
-    
+     
     return vertices, faces
 
 # Interpolates the Munsell renotation dataset along each of Hue, Value, Chroma
@@ -224,8 +226,6 @@ def to_mesh(df_3d):
 #   80+ hue steps
 #   20-30+ value steps
 #   30+ chroma steps
-
-# TODO: values interpolated near the caps sometimes have the wrong value for hue
 def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     """
     hue_steps : int
@@ -249,7 +249,7 @@ def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
     
     df = interpolate_hue(df, hue_steps)
     
-    # df = interpolate_edges(df, df_all, max_chroma)
+    df = interpolate_edges(df, df_all, max_chroma)
     
     return df
 
@@ -343,6 +343,7 @@ def interpolate_value(df, value_steps):
 # interpolate circumferentially, between hues, within each Value "plate"
 def interpolate_hue(df, hue_steps):
     all_points = []
+    
     for (value, chroma), group in df.groupby(["Value", "Chroma"]):
         
         # skip grayscale or groups with only one vertex
@@ -385,9 +386,12 @@ def interpolate_hue(df, hue_steps):
                 })
     
     df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
+    
+    df["HueDeg"] = np.round(df["HueDeg"], 6)  # Fix floating point precision
+    
     return df
 
-def interpolate_edges(df, df_all, max_chroma):
+def interpolate_edges(df, df_all, max_chroma, chroma_steps = 3):
     # after simple interpolation, detect which new spokes need extension based on their neighbours
     extension_points = []
     
@@ -504,7 +508,7 @@ def interpolate_edges(df, df_all, max_chroma):
         below_val = np.floor(value)
         t = value - below_val
         
-        print(below_val, hue)
+        # print(below_val, hue)
         
         target_max_chroma = (1 - t) * max_chroma[(below_val, hue)] + t * max_chroma[(below_val + 1, hue)]
         
@@ -543,6 +547,95 @@ def to_pointcloud(df_3d):
         h, v, c, is_clipped = row["HueDeg"], row["Value"], row["Chroma"], row["is_clipped"]
         vertices.append((x, y, z, r, g, b, h, v, c, is_clipped))
     return vertices
+
+# creates mesh with internal geometry
+def to_internal_mesh(df_3d):
+    # create global vertex list
+    vertices = []
+    index_map = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: None)))
+    index = 0
+    
+    for _, row in df_3d.iterrows():
+        h, v, c = row["HueDeg"], row["Value"], row["Chroma"]
+        vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], 
+                             row["R"], row["G"], row["B"], 
+                             h,v,c,
+                             row["is_clipped"]))
+        index_map[h][v][c] = index
+        index += 1
+    
+    valid_coords = []
+    for h in index_map:
+        for v in index_map[h]:
+            for c in index_map[h][v]:
+                valid_coords.append((h, v, c))
+                
+    # depends on interpolation density
+    # without interpolation it should be: 9, 1, 2
+    h_step, v_step, c_step = 9, 1, 2
+    
+    
+    # create cylinders between vertices of equal chroma, neighbouring hue/value
+    # create plates between vertices of equal value, neighbouring hue/chroma
+    # create fins between vertices of equal hue, neighbouring value/chroma 
+    faces = []
+    for h, v, c in valid_coords:
+        # TODO: special cases: 
+        # the seam from 360 to 9, 
+        # white/black to top plate, faces touching grayscale
+        curr = index_map[h][v][c]
+        
+        h_next = (h + h_step) % 360
+        v_next = v + v_step
+        c_next = c + c_step
+        
+        # Get neighbor indices (None if they don't exist)
+        h_neighbor = index_map[h_next][v][c]
+        v_neighbor = index_map[h][v_next][c]  
+        c_neighbor = index_map[h][v][c_next]
+        
+        hv_neighbor = index_map[h_next][v_next][c]
+        hc_neighbor = index_map[h_next][v][c_next]
+        vc_neighbor = index_map[h][v_next][c_next]
+        
+        # hue/value face, constant chroma
+        if h_neighbor is not None and v_neighbor is not None and hv_neighbor is not None:
+            # create 2 triangles that make a quad across this face
+            faces.append((curr, h_neighbor, hv_neighbor))
+            faces.append((curr, hv_neighbor, v_neighbor))
+        # if only 3 of the points exist, just make a triangle with those
+        elif h_neighbor is not None and v_neighbor is not None:
+            faces.append((curr, h_neighbor, v_neighbor))
+        elif h_neighbor is not None and hv_neighbor is not None:
+            faces.append((curr, h_neighbor, hv_neighbor))
+        elif v_neighbor is not None and hv_neighbor is not None:
+            faces.append((curr, v_neighbor, hv_neighbor))
+        
+        # hue/chroma face, constant value  
+        if h_neighbor is not None and c_neighbor is not None and hc_neighbor is not None:
+            faces.append((curr, h_neighbor, hc_neighbor))
+            faces.append((curr, hc_neighbor, c_neighbor))
+        elif h_neighbor is not None and c_neighbor is not None:
+            faces.append((curr, h_neighbor, c_neighbor))
+        elif h_neighbor is not None and hc_neighbor is not None:
+            faces.append((curr, h_neighbor, hc_neighbor))
+        elif c_neighbor is not None and hc_neighbor is not None:
+            faces.append((curr, c_neighbor, hc_neighbor))
+            
+        # value/chroma face constant hue)
+        if v_neighbor is not None and c_neighbor is not None and vc_neighbor is not None:
+            faces.append((curr, v_neighbor, vc_neighbor))
+            faces.append((curr, vc_neighbor, c_neighbor))
+        elif v_neighbor is not None and c_neighbor is not None:
+            faces.append((curr, v_neighbor, c_neighbor))
+        elif v_neighbor is not None and vc_neighbor is not None:
+            faces.append((curr, v_neighbor, vc_neighbor))
+        elif c_neighbor is not None and vc_neighbor is not None:
+            faces.append((curr, c_neighbor, vc_neighbor))
+    
+    return vertices, faces
+
+
 
 def write_obj(vertices, faces, filename="munsell_mesh.obj"):
     with open(filename, "w") as f:
@@ -585,15 +678,16 @@ def write_ply(vertices, faces, filename):
         for face in faces:
             f.write(f"3 {' '.join(map(str, face))}\n")
 
+
+
 def to_pointcloud_original():
     df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     df_3d = to_3d_coordinates(df_processed)
     
     vertices = to_pointcloud(df_3d)
     write_ply(vertices, [], "munsell_pointcloud_original.ply")
-
-
-def main():
+    
+def with_interpolation():
     # input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
     # df_raw = load_munsell_dat(input_url)
     
@@ -615,7 +709,32 @@ def main():
     df_3d.to_csv("munsell_3d.csv", index=False)
     print("saved to munsell_3d.csv")
     
-    df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
+    # df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
+    
+    # create a point cloud
+    vertices = to_pointcloud(df_3d)
+    write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
+    
+    # create a "shell" mesh
+    outer_vertices, faces = to_mesh(df_3d)
+    write_ply(outer_vertices, faces, "munsell_mesh.ply")
+    
+    print(":)")
+
+# point cloud and mesh with only the original dataset
+def original():
+    # input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
+    # df_raw = load_munsell_dat(input_url)
+    
+    # df_processed = process(df_raw)
+    # df_processed.to_csv("munsell_parsed.csv", index=False)
+    # print("saved to munsell_parsed.csv")
+    
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    
+    df_3d = to_3d_coordinates(df_processed)
+    df_3d.to_csv("munsell_3d.csv", index=False)
+    print("saved to munsell_3d.csv")
     
     # create a point cloud
     vertices = to_pointcloud(df_3d)
@@ -624,6 +743,16 @@ def main():
     # create a "shell" mesh
     outer_vertices, faces = to_mesh(df_3d)
     write_ply(outer_vertices, faces, "munsell_mesh.ply")
+
+
+
+def main():
+    df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
+    
+    vertices, faces = to_internal_mesh(df_3d)
+    write_ply(vertices, faces, "munsell_internalmesh.ply")
+    
+    # original()
     
     print(":)")
     
