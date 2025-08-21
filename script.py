@@ -224,8 +224,25 @@ def to_mesh(df_3d):
     return vertices, faces
 
 # new interpolate using LinearNDInterpolator
-# densities are multiplicative factors
-def interpolate(df, df_all = None, hue_density = 2, value_density=2, chroma_density=2):
+# TODO: still some bugs where some layers are missing
+# and handling of caps is awful
+def interpolate(df, df_all = None, hue_steps = 2, value_steps=3, chroma_steps=2):
+    """
+    hue_steps : int
+        Number of subdivisions between adjacent hue samples (of the same value and chroma)
+    value_steps : int
+        Number of subdivisions between adjacent Value layers
+    chroma_steps : int
+        Number of subdivisions between adjacent Chroma shells (of the same hue and value)
+    original data set has: 
+        40 hue steps
+        11 value steps (inclusive of white and black)
+        38 maximum chroma
+    target: 
+        80+ hue steps
+        20-30+ value steps
+        30+ chroma steps
+    """
     
     df = df.copy()
     df["is_original"] = True
@@ -259,21 +276,49 @@ def interpolate(df, df_all = None, hue_density = 2, value_density=2, chroma_dens
     interp_a = LinearNDInterpolator(points, df_augmented["a*"])
     interp_b = LinearNDInterpolator(points, df_augmented["b*"])
     
+    # build max chroma dictionary
+    max_chroma = defaultdict(int)
+    for (hue, value), group in df.groupby(["HueDeg", "Value"]):
+        max_chroma[(hue, value)] = group["Chroma"].max()
     
-    # TODO: change this to only in-bounds points, rn it's too thicc of a convex hull
-    # Generate denser grid
-    hue_range = np.linspace(df["HueDeg"].min(), df["HueDeg"].max(), 
-                           int(len(df["HueDeg"].unique()) * hue_density))
-    value_range = np.linspace(df["Value"].min(), df["Value"].max(),
-                             int(len(df["Value"].unique()) * value_density))
-    chroma_range = np.linspace(0, df["Chroma"].max(),
-                              int(df["Chroma"].max() * chroma_density))
-    # grid of new points
+    # original hue/value/chroma spacing is 9, 1, 2 
+    hue_stepsize, value_stepsize, chroma_stepsize = 9/hue_steps, 1/value_steps, 2/chroma_steps
+    
+    for existing_value in sorted(df_augmented["Value"].unique()):
+        existing_hues = sorted([hue for (hue, val) in max_chroma.keys() if val == existing_value])
+        
+        for h1, h2 in pairwise(existing_hues):
+            c1, c2 = max_chroma[(h1, existing_value)], max_chroma[(h2, existing_value)]
+            
+            # need to do h2+hue_stepsize because it needs to wrap around??
+            # idk it's not working perfectly
+            # interpolate between h1 and h2
+            for h in np.arange(h1, h2 + hue_stepsize, hue_stepsize):
+                t = (h - h1) / (h2 - h1)
+                max_chroma[(h, existing_value)] = (1-t) * c1 + t * c2
+    
+    for h in np.arange(df_augmented["HueDeg"].min(), df_augmented["HueDeg"].max(), hue_stepsize):
+        # TODO not sure if this is right
+        all_vals = sorted([val for (h_key, val) in max_chroma.keys() if h_key == h])
+        
+        for v1, v2 in pairwise(all_vals):
+            c1, c2 = max_chroma[(h, v1)], max_chroma[(h, v2)]
+            
+            for v in np.arange(v1, v2, value_stepsize):
+                t = (v - v1) / (v2 - v1)
+                max_chroma[(h, v)] = (1-t) * c1 + t * c2
+    
     new_points = []
-    for h in hue_range:
-        for v in value_range:
-            for c in chroma_range:
-                new_points.append([h, v, c])
+    
+    for h in np.arange(df_augmented["HueDeg"].min(), df_augmented["HueDeg"].max(), hue_stepsize):
+        for v in np.arange(df_augmented["Value"].min(), df_augmented["Value"].max(), value_stepsize):
+            if (h, v) in max_chroma:
+                max_chroma_limit = max_chroma[(h, v)]
+                for c in np.arange(df_augmented["Chroma"].min(), df_augmented["Chroma"].max(), chroma_stepsize):
+                    if c > max_chroma_limit:
+                        break
+                    else:
+                        new_points.append([h, v, c])
     
     new_points = np.array(new_points)
     
@@ -282,7 +327,7 @@ def interpolate(df, df_all = None, hue_density = 2, value_density=2, chroma_dens
     new_a = interp_a(new_points)
     new_b = interp_b(new_points)
     
-    # Filter out NaN results (points outside convex hull)
+    # filter out any NaN results
     valid_mask = ~(np.isnan(new_L) | np.isnan(new_a) | np.isnan(new_b))
     
     # vectorized Lab_to_sRGB conversion
@@ -306,13 +351,13 @@ def interpolate(df, df_all = None, hue_density = 2, value_density=2, chroma_dens
         "G": sRGB_array[:, 1],
         "B": sRGB_array[:, 2],
         "is_original": False,
-        "is_clipped": is_clipped_array
+        "is_clipped": is_clipped_array,
+        "flagged_to_drop": False
     })
     
-    # remove duplicated points and combine with interpolated data
-    df_cleaned = df[~df["flagged_to_drop"]].drop(columns=["flagged_to_drop"]).reset_index(drop=True)
+    # df_cleaned = df[~df["flagged_to_drop"]].drop(columns=["flagged_to_drop"]).reset_index(drop=True)
     
-    df_result = pd.concat([df_cleaned, pd.DataFrame(interpolated_points)], ignore_index=True)
+    df_result = pd.concat([df, interpolated_points], ignore_index=True)
     
     return df_result
 
@@ -445,10 +490,6 @@ def interpolate_hue(df, hue_steps):
     all_points = []
     
     for (value, chroma), group in df.groupby(["Value", "Chroma"]):
-        
-        # skip grayscale or groups with only one vertex
-        if chroma == 0 or len(group) < 2: 
-            continue
                 
         group = group.sort_values("HueDeg")
         hue_pts = group[["HueDeg", "L*", "a*", "b*"]].to_numpy()
@@ -518,68 +559,12 @@ def interpolate_edges(df, df_all, max_chroma, chroma_steps = 3):
         # t for hue lerp
         t = (hue % 9) / 9
         
-        # corresponding munsell hues (e.g. 7.5YR) etc
-        left_munsellhue = df[df['HueDeg'] == left_hue]['Hue'].iloc[0]
-        right_munsellhue = df[df['HueDeg'] == right_hue]['Hue'].iloc[0]
-        
         # Calculate what this spoke's length should be
         # by lerping between left and right max chromas
         target_max_chroma = (1-t) * max_chroma[(value, left_hue)] + t * max_chroma[(value, right_hue)]
         
         # np.arange is range with floats
         for chroma in np.arange(current_max_chroma, target_max_chroma, 1/chroma_steps):
-            
-            # refer to integer chroma values in df_all
-            inner_chroma = int(np.floor(chroma))
-            outer_chroma = inner_chroma + 1
-            """
-            # the 4 reference neighbours
-            left_inner = df_all[(df_all['Hue'] == left_munsellhue) & 
-                                (df_all['Value'] == value) & 
-                                (df_all['Chroma'] == inner_chroma)].iloc[0]
-            
-            left_outer = df_all[(df_all['Hue'] == left_munsellhue) & 
-                                (df_all['Value'] == value) & 
-                                (df_all['Chroma'] == outer_chroma)].iloc[0]
-            
-            right_inner = df_all[(df_all['Hue'] == right_munsellhue) & 
-                                    (df_all['Value'] == value) & 
-                                    (df_all['Chroma'] == inner_chroma)].iloc[0]
-            
-            right_outer = df_all[(df_all['Hue'] == right_munsellhue) & 
-                                    (df_all['Value'] == value) & 
-                                    (df_all['Chroma'] == outer_chroma)].iloc[0]
-            
-            # convert 4 neighbours to lab
-            left_inner_lab = munsell_pt_to_lab(left_inner)
-            left_outer_lab = munsell_pt_to_lab(left_outer)
-            right_inner_lab = munsell_pt_to_lab(right_inner)
-            right_outer_lab = munsell_pt_to_lab(right_outer)
-            
-            # calculate lerp factor t for chroma
-            if outer_chroma == inner_chroma:
-                t_chroma = 0
-            else:
-                t_chroma = (chroma - inner_chroma) / (outer_chroma - inner_chroma)
-                
-            # interpolate along chroma axis for each hue
-            left_lab = (1 - t_chroma) * left_inner_lab + t_chroma * left_outer_lab
-            right_lab = (1 - t_chroma) * right_inner_lab + t_chroma * right_outer_lab
-            
-            lerp = (1 - t) * left_lab + t * right_lab
-            L, a, b = lerp
-            sRGB, is_clipped = Lab_to_sRGB(Lab)
-                
-            extension_points.append({
-                "HueDeg": hue,
-                "Value": value,
-                "Chroma": chroma,
-                "L*": L, "a*": a, "b*": b,
-                "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
-                "is_original": False,
-                "is_clipped": is_clipped,
-            })
-            """
             # placeholder: place gray points (it works)
             extension_points.append({
                 "HueDeg": hue,
@@ -608,13 +593,9 @@ def interpolate_edges(df, df_all, max_chroma, chroma_steps = 3):
         below_val = np.floor(value)
         t = value - below_val
         
-        # print(below_val, hue)
-        
         target_max_chroma = (1 - t) * max_chroma[(below_val, hue)] + t * max_chroma[(below_val + 1, hue)]
         
         for chroma in np.arange(current_max_chroma, target_max_chroma, 1/chroma_steps):
-            # print(f"target, current max chromas: {target_max_chroma}, {current_max_chroma}")
-            
             # placeholder gray points
             extension_points.append({
                 "HueDeg": hue,
