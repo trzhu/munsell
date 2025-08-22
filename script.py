@@ -154,7 +154,7 @@ def to_3d_coordinates(df):
     return df
 
 # generate 3d mesh defined by the outermost vertices
-# TODO: isnt great with fully interpolated mesh, not sure why rn
+# TODO: THERES A LITTLE TEAR AT THE BOTTOM OF PURPLE WILL INVESTIGATE LATER
 def to_mesh(df_3d):
     # each entry of the dictionary is a df of all points with that Value
     # represents a horizontal "plate", which are stacked to form the space
@@ -278,40 +278,45 @@ def interpolate(df, df_all = None, hue_steps = 2, value_steps=3, chroma_steps=2)
     
     # build max chroma dictionary
     max_chroma = defaultdict(int)
-    for (hue, value), group in df.groupby(["HueDeg", "Value"]):
+    for (hue, value), group in df_augmented.groupby(["HueDeg", "Value"]):
         max_chroma[(hue, value)] = group["Chroma"].max()
-    
+        
     # original hue/value/chroma spacing is 9, 1, 2 
     hue_stepsize, value_stepsize, chroma_stepsize = 9/hue_steps, 1/value_steps, 2/chroma_steps
+    
+    hue_grid = np.arange(df["HueDeg"].min(), df["HueDeg"].max(), hue_stepsize)
+    value_grid = np.arange(df["Value"].min(), df["Value"].max(), value_stepsize)
     
     for existing_value in sorted(df_augmented["Value"].unique()):
         existing_hues = sorted([hue for (hue, val) in max_chroma.keys() if val == existing_value])
         
         for h1, h2 in pairwise(existing_hues):
+            if h2 - h1 != 9.0:
+                continue
+            
             c1, c2 = max_chroma[(h1, existing_value)], max_chroma[(h2, existing_value)]
             
             # need to do h2+hue_stepsize because it needs to wrap around??
-            # idk it's not working perfectly
-            # interpolate between h1 and h2
             for h in np.arange(h1, h2 + hue_stepsize, hue_stepsize):
                 t = (h - h1) / (h2 - h1)
                 max_chroma[(h, existing_value)] = (1-t) * c1 + t * c2
     
-    for h in np.arange(df_augmented["HueDeg"].min(), df_augmented["HueDeg"].max(), hue_stepsize):
-        # TODO not sure if this is right
-        all_vals = sorted([val for (h_key, val) in max_chroma.keys() if h_key == h])
+    for h in hue_grid:
+        existing_vals = sorted([val for (h_key, val) in max_chroma.keys() if h_key == h])
         
-        for v1, v2 in pairwise(all_vals):
+        for v1, v2 in pairwise(existing_vals):
             c1, c2 = max_chroma[(h, v1)], max_chroma[(h, v2)]
-            
-            for v in np.arange(v1, v2, value_stepsize):
-                t = (v - v1) / (v2 - v1)
-                max_chroma[(h, v)] = (1-t) * c1 + t * c2
+            for v in value_grid:
+                # have to use the whole value grid and limit to between the bounds
+                # OR WE MIGHT GET FLOATING POINT MISMATCH LATER
+                if v1 < v < v2:
+                    t = (v - v1) / (v2 - v1)
+                    max_chroma[(h, v)] = (1-t) * c1 + t * c2
     
     new_points = []
     
-    for h in np.arange(df_augmented["HueDeg"].min(), df_augmented["HueDeg"].max(), hue_stepsize):
-        for v in np.arange(df_augmented["Value"].min(), df_augmented["Value"].max(), value_stepsize):
+    for h in hue_grid:
+        for v in value_grid:
             if (h, v) in max_chroma:
                 max_chroma_limit = max_chroma[(h, v)]
                 for c in np.arange(df_augmented["Chroma"].min(), df_augmented["Chroma"].max(), chroma_stepsize):
@@ -355,267 +360,9 @@ def interpolate(df, df_all = None, hue_steps = 2, value_steps=3, chroma_steps=2)
         "flagged_to_drop": False
     })
     
-    # df_cleaned = df[~df["flagged_to_drop"]].drop(columns=["flagged_to_drop"]).reset_index(drop=True)
-    
     df_result = pd.concat([df, interpolated_points], ignore_index=True)
     
     return df_result
-
-# Interpolates the Munsell renotation dataset along each of Hue, Value, Chroma
-# perform the interpolation in CIELAB.
-# original data set has: 
-#   40 hue steps
-#   11 value steps (inclusive of white and black)
-#   38 maximum chroma
-# target: 
-#   80+ hue steps
-#   20-30+ value steps
-#   30+ chroma steps
-# def interpolate(df, df_all, hue_steps=2, value_steps=2, chroma_steps=3):
-    """
-    hue_steps : int
-        Number of subdivisions between adjacent hue samples (of the same value and chroma)
-    value_steps : int
-        Number of subdivisions between adjacent Value layers
-    chroma_steps : int
-        Number of subdivisions between adjacent Chroma shells (of the same hue and value)
-
-    Returns
-    DataFrame
-        Combined dataframe with original and interpolated points, 
-        with `is_original` flag.
-    """
-    df = df.copy()
-    df["is_original"] = True
-    
-    df, max_chroma = interpolate_chroma(df, chroma_steps)
-    
-    df = interpolate_value(df, value_steps)
-    
-    df = interpolate_hue(df, hue_steps)
-    
-    df = interpolate_edges(df, df_all, max_chroma)
-    
-    return df
-
-# interpolate radially, in cylindrical shells
-# returns df + max chroma at each point
-def interpolate_chroma(df, chroma_steps = 3):
-    # this section duplicates grays so that each hue slice can have its own gray
-    # helps with radial interpolation
-    grays = df[df["Chroma"] == 0]
-    augmented = []
-
-    for _, gray in grays.iterrows():
-        for hue in df["HueDeg"].unique():
-            g = gray.copy()
-            g["HueDeg"] = hue
-            augmented.append(g)
-    df = pd.concat([df, pd.DataFrame(augmented)], ignore_index=True)
-    
-    all_points = []
-    
-    # build a map of maximum chroma at each (value, hue) position
-    # this is so when I interpolate later, I can reference the max chroma of neighbouring "spokes"
-    max_chroma = {}
-    
-    # interpolate radially along Chroma axis
-    # splits the df into buckets that have the same value and huedeg
-    # so we can interpolate between chroma
-    for (value, hue), group in df.groupby(["Value", "HueDeg"]):
-        # save for later
-        max_chroma[(value, hue)] = group["Chroma"].max()
-        
-        group = group.sort_values("Chroma")
-        chroma_pts = group[["Chroma", "L*", "a*", "b*"]].to_numpy()
-        for i in range(len(chroma_pts) - 1):
-            p1 = chroma_pts[i]
-            p2 = chroma_pts[i+1]
-            for t in np.linspace(0, 1, chroma_steps+2)[1:-1]:
-                # interpolate in Lab, then convert lab to rgb
-                lerp = (1-t)*p1 + t*p2
-                chroma, L, a, b = lerp
-                
-                Lab = np.array([[L, a, b]])
-                sRGB, is_clipped = Lab_to_sRGB(Lab)
-                
-                all_points.append({
-                    "HueDeg": hue,
-                    "Value": value,
-                    "Chroma": chroma,
-                    "L*": L, "a*": a, "b*": b,
-                    "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
-                    "is_original": False,
-                    "is_clipped": is_clipped
-                })
-    
-    # drop the extra grayscales now that we're done with them
-    df = df[~((df["Chroma"] == 0) & (df["HueDeg"] != 0))].reset_index(drop=True)
-    
-    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
-    return df, max_chroma
-
-# interpolate vertically, between Value "plates"
-def interpolate_value(df, value_steps):
-    all_points = [] 
-    for (chroma, hue), group in df.groupby(["Chroma", "HueDeg"]):
-        group = group.sort_values("Value")
-        value_pts = group[["Value", "L*", "a*", "b*"]].to_numpy()
-        for i in range(len(value_pts) - 1):
-            p1 = value_pts[i]
-            p2 = value_pts[i+1]
-            for t in np.linspace(0, 1, value_steps+2)[1:-1]:
-                lerp = (1-t)*p1 + t*p2
-                value, L, a, b = lerp
-                
-                Lab = np.array([[L, a, b]])
-                sRGB, is_clipped = Lab_to_sRGB(Lab)
-                
-                all_points.append({
-                    "HueDeg": hue,
-                    "Value": value,
-                    "Chroma": chroma,
-                    "L*": L, "a*": a, "b*": b,
-                    "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
-                    "is_original": False,
-                    "is_clipped": is_clipped
-                })
-
-    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)    
-    return df
-
-
-# interpolate circumferentially, between hues, within each Value "plate"
-def interpolate_hue(df, hue_steps):
-    all_points = []
-    
-    for (value, chroma), group in df.groupby(["Value", "Chroma"]):
-                
-        group = group.sort_values("HueDeg")
-        hue_pts = group[["HueDeg", "L*", "a*", "b*"]].to_numpy()
-        
-        for i in range(len(hue_pts)):
-            p1 = hue_pts[i]
-            p2 = hue_pts[(i+1) % len(hue_pts)]
-            
-            # if angular difference between two spokes isn't 9.0, they aren't actually next to each other
-            hue_delta = (p2[0] - p1[0]) % 360
-            if hue_delta != 9.0:
-                continue
-            
-            for t in np.linspace(0, 1, hue_steps+2)[1:-1]:
-                lab_lerp = (1-t)*p1[1:] + t*p2[1:]
-                L, a, b = lab_lerp
-                
-                # cant lerp HueDeg - handle the seam from 360 to 0
-                if i == len(hue_pts) - 1 or p2[0] < p1[0]:
-                    hue = ((1-t)*p1[0] + t*(p2[0]+360)) % 360
-                else:
-                    hue = ((1-t)*p1[0] + t*p2[0]) % 360
-                
-                Lab = np.array([[L, a, b]])
-                sRGB, is_clipped = Lab_to_sRGB(Lab)
-                
-                all_points.append({
-                    "HueDeg": hue,
-                    "Value": value,
-                    "Chroma": chroma,
-                    "L*": L, "a*": a, "b*": b,
-                    "R": sRGB[0, 0], "G": sRGB[0, 1], "B": sRGB[0, 2],
-                    "is_original": False,
-                    "is_clipped": is_clipped,
-                })
-    
-    df = pd.concat([df, pd.DataFrame(all_points)], ignore_index=True)
-    
-    df["HueDeg"] = np.round(df["HueDeg"], 6)  # Fix floating point precision
-    
-    return df
-
-def interpolate_edges(df, df_all, max_chroma, chroma_steps = 3):
-    # after simple interpolation, detect which new spokes need extension based on their neighbours
-    extension_points = []
-    
-    # group by (Value, HueDeg) to work spoke by spoke
-    # one dimension at a time
-    # first, find hue neighbours (left and right neighbours)
-    for (value, hue), spoke in df[df['Value'] % 1 == 0].groupby(["Value", "HueDeg"]):
-        # for floating point issues
-        value, hue = np.round(value), np.round(hue)
-        
-        # skip black and white and grayscale
-        if value in [0, 10] or hue == 0:
-            continue
-        
-        # skip original spokes
-        if spoke["is_original"].all():
-            continue
-        
-        current_max_chroma = spoke["Chroma"].max()
-        
-        # in the original data, HueDeg has intervals of 9
-        left_hue = 9 * (hue // 9)
-        right_hue = (9 + left_hue) % 360
-        # t for hue lerp
-        t = (hue % 9) / 9
-        
-        # Calculate what this spoke's length should be
-        # by lerping between left and right max chromas
-        target_max_chroma = (1-t) * max_chroma[(value, left_hue)] + t * max_chroma[(value, right_hue)]
-        
-        # np.arange is range with floats
-        for chroma in np.arange(current_max_chroma, target_max_chroma, 1/chroma_steps):
-            # placeholder: place gray points (it works)
-            extension_points.append({
-                "HueDeg": hue,
-                "Value": value,
-                "Chroma": chroma,
-                "L*": 1, "a*": 0, "b*": 0,
-                "R": 0.5, "G": 0.5, "B": 0.5,
-                "is_original": False,
-                "is_clipped": False,
-            })
-    
-    # NEXT, find value neighbours (above & below)
-    # in the original data, value is in intervals of one
-    for (value, hue), spoke in df[df["HueDeg"] % 9 == 0].groupby(["Value", "HueDeg"]):
-        
-        # skip black and white and grayscale
-        if value in [0, 10] or hue == 0:
-            continue
-        
-        # skip original spokes
-        if spoke["is_original"].all():
-            continue
-        
-        current_max_chroma = spoke["Chroma"].max()
-        
-        below_val = np.floor(value)
-        t = value - below_val
-        
-        target_max_chroma = (1 - t) * max_chroma[(below_val, hue)] + t * max_chroma[(below_val + 1, hue)]
-        
-        for chroma in np.arange(current_max_chroma, target_max_chroma, 1/chroma_steps):
-            # placeholder gray points
-            extension_points.append({
-                "HueDeg": hue,
-                "Value": value,
-                "Chroma": chroma,
-                "L*": 1, "a*": 0, "b*": 0,
-                "R": 0.5, "G": 0.5, "B": 0.5,
-                "is_original": False,
-                "is_clipped": False,
-            })
-            
-    df = pd.concat([df, pd.DataFrame(extension_points)], ignore_index=True)
-    return df
-
-# helper for interpolate
-def munsell_pt_to_lab(ref_point):
-    xyY = np.array([ref_point['x'], ref_point['y'], ref_point['Y_lum']/100])
-    xyz = xyY_to_XYZ(xyY.reshape(1, -1))
-    lab = XYZ_to_Lab(xyz, illuminant=ILLUM_C)[0]
-    return lab
 
 # put all vertices in a point cloud
 def to_pointcloud(df_3d):
@@ -670,46 +417,13 @@ def write_ply(vertices, faces, filename):
         for face in faces:
             f.write(f"3 {' '.join(map(str, face))}\n")
 
-
-
+# point cloud of only original dataset
 def to_pointcloud_original():
     df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     df_3d = to_3d_coordinates(df_processed)
     
     vertices = to_pointcloud(df_3d)
     write_ply(vertices, [], "munsell_pointcloud_original.ply")
-    
-def with_interpolation():
-    # input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
-    # df_raw = load_munsell_dat(input_url)
-    
-    # df_processed = process(df_raw)
-    # df_processed.to_csv("munsell_parsed.csv", index=False)
-    # print("saved to munsell_parsed.csv")
-    
-    all_url = "https://www.rit-mcsl.org/MunsellRenotation/all.dat"
-    df_all = load_munsell_dat(all_url)
-    # df_all.to_csv("munsell_all.csv", index = False)
-    
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
-    
-    df_interpolated = interpolate(df_processed, df_all)
-    df_interpolated.to_csv("munsell_interpolated.csv", index=False)
-    print("saved to munsell_interpolated.csv")
-    
-    df_3d = to_3d_coordinates(df_interpolated)
-    df_3d.to_csv("munsell_3d.csv", index=False)
-    print("saved to munsell_3d.csv")
-    
-    # df_3d = pd.read_csv("munsell_3d.csv", index_col=False)
-    
-    # create a point cloud
-    vertices = to_pointcloud(df_3d)
-    write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
-    
-    # create a "shell" mesh
-    outer_vertices, faces = to_mesh(df_3d)
-    write_ply(outer_vertices, faces, "munsell_mesh.ply")
 
 # point cloud and mesh with only the original dataset
 def original():
