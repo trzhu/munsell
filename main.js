@@ -6,14 +6,19 @@ let scene, camera, renderer, controls;
 let slicer;
 let isPaused = false;
 
-const meshes = {}; // dictionary of meshes
-// keys: "shell", "pointcloud", "pointcloud_original"
+// Y scaling factor so value 0-10 looks bigger
+const Y_SCALE = 3;
+
+// dictionary of meshes
+// keys: "shell", "pointcloud", "pointcloud_original, cutSurfaces"
+const meshes = {};
+
 
 // Scene configurations
 const sceneConfigs = {
   default: {
     name: "Volume",
-    visible: ["shell"],
+    visible: ["shell", "cutSurfaces"],
     hidden: ["pointcloud_interpolated", "pointcloud_original"],
   },
   pointCloud: {
@@ -163,6 +168,7 @@ function switchScene(sceneKey) {
   }
 }
 
+// TODO: move cut surface handling into this class
 class Slicer {
   constructor() {
     this.uniforms = {
@@ -172,13 +178,17 @@ class Slicer {
       chromaMax: { value: 38.0 },
       valueMin: { value: 0.0 },
       valueMax: { value: 10.0 },
-      uSize: {value: 10.0},
+      uSize: {value: 10.0}, // point size for point clouds
       useLighting: {value: 0.0},
-      showOutsideRGB: {value: 1.0}
+      showOutsideRGB: {value: 1.0},
+      interiorTexture: {value: null}
     };
 
     this.shadersPromise = this.loadShaders();
+    this.group = this.initCutSurfaces();
+    this.loadTextures();
   }
+
 
   async loadShaders() {
     const [meshVertex, meshFragment, pointsVertex, pointsFragment, sliceVertex, sliceFragment] =
@@ -189,31 +199,32 @@ class Slicer {
         fetch("./shaders/points_fragment.glsl").then((r) => r.text()),
         fetch("./shaders/slice_vertex.glsl").then((r) => r.text()),
         fetch("./shaders/slice_fragment.glsl").then((r) => r.text()),
-        
       ]);
 
     return { meshVertex, meshFragment, pointsVertex, pointsFragment, sliceVertex, sliceFragment };
   }
 
-  async getMaterial(type = "points") {
+  async loadTextures() {
+    const texture3D = await load3DTexture("./texture3d_64.bin", 64);
+    this.uniforms.interiorTexture.value = texture3D;
+  }
+
+  async getMaterial(type) {
     const shaders = await this.shadersPromise;
 
-    let vertexShader, fragmentShader;
+    let vertexShader, fragmentShader, side;
     if (type === "points") {
       vertexShader = shaders.pointsVertex;
       fragmentShader = shaders.pointsFragment;
+      side = THREE.FrontSide;
     } else if (type === "mesh") {
       vertexShader = shaders.meshVertex;
       fragmentShader = shaders.meshFragment;
-    } else if (type === "slice") {
-      return new THREE.ShaderMaterial({
-        vertexShader: shaders.sliceVertex,
-        fragmentShader: shaders.sliceFragment,
-        side: THREE.DoubleSide,
-        transparent: false,
-        depthTest: true,
-        depthWrite: true,
-      });
+      side = THREE.FrontSide;
+    } else if (type === "cutSurface") {
+      vertexShader = shaders.sliceVertex;
+      fragmentShader = shaders.sliceFragment;
+      side = THREE.DoubleSide;
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -223,7 +234,74 @@ class Slicer {
       fragmentShader,
       uniforms: this.uniforms,
       transparent: true,
+      side: side
     });
+  }
+
+  initCutSurfaces() {
+    const group = new THREE.Group();
+
+    // dimensions of mesh: height = 3 * Y_SCALE = 30, max radius = 38
+    const huePlaneGeom = new THREE.PlaneGeometry(38, 10 * Y_SCALE);
+    const valuePlaneGeom = new THREE.PlaneGeometry(80, 80);
+
+    const materialPromise = this.getMaterial("cutSurface");
+
+    materialPromise.then((material) => {
+      // hue planes
+      // tbh should move these bc rn it's a diameter not a radius
+      const hueMinPlane = new THREE.Mesh(huePlaneGeom, material);
+      hueMinPlane.position.y = 5 * Y_SCALE; // centre of mesh
+      hueMinPlane.rotation.y = this.uniforms.hueMin.value;
+      hueMinPlane.position.z = 19 * Math.sin(this.uniforms.hueMin.value);
+      hueMinPlane.position.x = 19 * Math.cos(this.uniforms.hueMin.value);
+      group.add(hueMinPlane);
+    
+      const hueMaxPlane = new THREE.Mesh(huePlaneGeom, material);
+      hueMaxPlane.position.y = 5 * Y_SCALE;
+      hueMaxPlane.rotation.y = this.uniforms.hueMax.value;
+      hueMaxPlane.position.z = 19 * Math.sin(this.uniforms.hueMax.value);
+      hueMaxPlane.position.x = 19 * Math.cos(this.uniforms.hueMax.value);
+      group.add(hueMaxPlane);
+    
+      // value planes
+      const valueMinPlane = new THREE.Mesh(valuePlaneGeom, material);
+      valueMinPlane.rotation.x = Math.PI / 2;
+      valueMinPlane.position.y = this.uniforms.valueMin.value * Y_SCALE;
+      group.add(valueMinPlane);
+    
+      const valueMaxPlane = new THREE.Mesh(valuePlaneGeom, material);
+      valueMaxPlane.rotation.x = Math.PI / 2;
+      valueMaxPlane.position.y = this.uniforms.valueMax.value * Y_SCALE;
+      group.add(valueMaxPlane);
+    
+      // chroma cylinders
+      const chromaMinCyl = new THREE.Mesh(
+        new THREE.CylinderGeometry(this.uniforms.chromaMin.value, this.uniforms.chromaMin.value, 1 * Y_SCALE, 64, 1, true),
+        material
+      );
+      chromaMinCyl.position.y = 5 * Y_SCALE; // centre of mesh
+      group.add(chromaMinCyl);
+    
+      const chromaMaxCyl = new THREE.Mesh(
+        new THREE.CylinderGeometry(this.uniforms.chromaMax.value, this.uniforms.chromaMax.value, 10 * Y_SCALE, 64, 1, true),
+        material
+      );
+      chromaMaxCyl.position.y = 5 * Y_SCALE;
+      group.add(chromaMaxCyl);
+      
+    const meshObj = {
+        geometry: null,
+        materials: material,
+        mesh: group,
+        config: "cutSurface"
+      };
+
+    scene.add(group);
+    meshes["cutSurfaces"] = meshObj;
+
+    });
+    return group
   }
 
   setHueRange(min, max) {
@@ -245,7 +323,6 @@ class Slicer {
     this.uniforms.useLighting.value = 1 - this.uniforms.useLighting.value;
   }
 
-  // todo hook this up to a button
   toggleRGB() {
     this.uniforms.showOutsideRGB.value = 1 - this.uniforms.showOutsideRGB.value;
   }
@@ -555,9 +632,6 @@ async function loadCustomPLY(url) {
     }
   }
   
-  // console.log(`Loading PLY: ${vertexCount} vertices, ${faceCount} faces`);
-  // console.log('Vertex properties:', vertexProperties.map(p => p.name));
-  
   // Parse vertex data
   const positions = [];
   const colors = [];
@@ -632,7 +706,6 @@ async function loadCustomPLY(url) {
   return geometry;
 }
 
-
 // Generalized mesh loader
 function loadMeshes() {
   const meshConfigs = [
@@ -647,11 +720,11 @@ function loadMeshes() {
     // interpolated point cloud
     // tbh this should never get shown
     {
-      file: "./munsell_pointcloud.ply",
+      file: "./munsell_pointcloud_interpolated.ply",
       name: "pointcloud_interpolated",
       type: "points",
       materials: {
-        points: async () => await slicer.getMaterial("slice"),
+        points: async () => await slicer.getMaterial("points"),
       }
     },
     // raw real.dat data points
@@ -665,7 +738,6 @@ function loadMeshes() {
     },
   ];
 
-  // const loader = new PLYLoader();
   let loadedCount = 0;
   const totalMeshes = meshConfigs.length;
 
@@ -763,7 +835,29 @@ function animate() {
   controls.update();
 }
 
-function main() {
+async function load3DTexture(filename, size) {
+  const response = await fetch(filename);
+  if (!response.ok) {
+    throw new Error(`Failed to load texture: ${response.statusText}`);
+  }
+  
+  const arrayBuffer = await response.arrayBuffer();
+  const data = new Uint8Array(arrayBuffer);
+  
+  const texture = new THREE.Data3DTexture(data, size, size, size);
+  texture.format = THREE.RGBAFormat;
+  texture.type = THREE.UnsignedByteType;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.wrapR = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  
+  return texture;
+}
+
+async function main() {
   initScene();
   slicer = new Slicer();
   loadMeshes();
