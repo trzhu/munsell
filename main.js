@@ -28,7 +28,8 @@ const sceneConfigs = {
   },
   debug: {
     name: "Debug",
-    visible: ["pointcloud_interpolated"],
+    visible: ["cutSurfaces"],
+    // visible: ["pointcloud_interpolated"],
     hidden: ["shell", "pointcloud_original"]
   }
 };
@@ -168,7 +169,6 @@ function switchScene(sceneKey) {
   }
 }
 
-// TODO: move cut surface handling into this class
 class Slicer {
   constructor() {
     this.uniforms = {
@@ -185,8 +185,19 @@ class Slicer {
     };
 
     this.shadersPromise = this.loadShaders();
+    // group of mesh geometries
     this.group = this.initCutSurfaces();
     this.loadTextures();
+
+    // individual mesh references
+    this.meshRefs = {
+      hueMinPlane: null,
+      hueMaxPlane: null,
+      valueMinPlane: null,
+      valueMaxPlane: null,
+      chromaMinCyl: null,
+      chromaMaxCyl: null
+    };
   }
 
 
@@ -249,74 +260,116 @@ class Slicer {
 
     materialPromise.then((material) => {
       // hue planes
-      // tbh should move these bc rn it's a diameter not a radius
-      const hueMinPlane = new THREE.Mesh(huePlaneGeom, material);
-      hueMinPlane.position.y = 5 * Y_SCALE; // centre of mesh
-      hueMinPlane.rotation.y = this.uniforms.hueMin.value;
-      hueMinPlane.position.z = 19 * Math.sin(this.uniforms.hueMin.value);
-      hueMinPlane.position.x = 19 * Math.cos(this.uniforms.hueMin.value);
-      group.add(hueMinPlane);
-    
-      const hueMaxPlane = new THREE.Mesh(huePlaneGeom, material);
-      hueMaxPlane.position.y = 5 * Y_SCALE;
-      hueMaxPlane.rotation.y = this.uniforms.hueMax.value;
-      hueMaxPlane.position.z = 19 * Math.sin(this.uniforms.hueMax.value);
-      hueMaxPlane.position.x = 19 * Math.cos(this.uniforms.hueMax.value);
-      group.add(hueMaxPlane);
-    
+      this.meshRefs.hueMinPlane = new THREE.Mesh(huePlaneGeom, material);
+      this.meshRefs.hueMinPlane.position.y = 5 * Y_SCALE; // centre of mesh
+      this.meshRefs.hueMinPlane.rotation.y = this.uniforms.hueMin.value;
+      
+      this.meshRefs.hueMaxPlane = new THREE.Mesh(huePlaneGeom, material);
+      this.meshRefs.hueMaxPlane.position.y = 5 * Y_SCALE; // centre of mesh
+      this.meshRefs.hueMaxPlane.rotation.y = this.uniforms.hueMin.value;
+      
       // value planes
-      const valueMinPlane = new THREE.Mesh(valuePlaneGeom, material);
-      valueMinPlane.rotation.x = Math.PI / 2;
-      valueMinPlane.position.y = this.uniforms.valueMin.value * Y_SCALE;
-      group.add(valueMinPlane);
-    
-      const valueMaxPlane = new THREE.Mesh(valuePlaneGeom, material);
-      valueMaxPlane.rotation.x = Math.PI / 2;
-      valueMaxPlane.position.y = this.uniforms.valueMax.value * Y_SCALE;
-      group.add(valueMaxPlane);
-    
+      this.meshRefs.valueMinPlane = new THREE.Mesh(valuePlaneGeom, material);
+      this.meshRefs.valueMinPlane.rotation.x = Math.PI / 2;
+
+      this.meshRefs.valueMaxPlane = new THREE.Mesh(valuePlaneGeom, material);
+      this.meshRefs.valueMaxPlane.rotation.x = Math.PI / 2;
+      
       // chroma cylinders
-      const chromaMinCyl = new THREE.Mesh(
-        new THREE.CylinderGeometry(this.uniforms.chromaMin.value, this.uniforms.chromaMin.value, 1 * Y_SCALE, 64, 1, true),
+      this.meshRefs.chromaMinCyl = new THREE.Mesh(
+        new THREE.CylinderGeometry(this.uniforms.chromaMin.value, this.uniforms.chromaMin.value, 10 * Y_SCALE, 64, 1, true),
         material
       );
-      chromaMinCyl.position.y = 5 * Y_SCALE; // centre of mesh
-      group.add(chromaMinCyl);
-    
-      const chromaMaxCyl = new THREE.Mesh(
+      this.meshRefs.chromaMinCyl.position.y = 5 * Y_SCALE;
+
+      this.meshRefs.chromaMaxCyl = new THREE.Mesh(
         new THREE.CylinderGeometry(this.uniforms.chromaMax.value, this.uniforms.chromaMax.value, 10 * Y_SCALE, 64, 1, true),
         material
       );
-      chromaMaxCyl.position.y = 5 * Y_SCALE;
-      group.add(chromaMaxCyl);
-      
-    const meshObj = {
-        geometry: null,
-        materials: material,
-        mesh: group,
-        config: "cutSurface"
-      };
+      this.meshRefs.chromaMaxCyl.position.y = 5 * Y_SCALE;
 
-    scene.add(group);
-    meshes["cutSurfaces"] = meshObj;
+      this.updateMeshPositions();
+
+      // add all meshes to geometry group
+      Object.values(this.meshRefs).forEach(mesh => {
+        if (mesh) group.add(mesh);
+      });
+      
+      const meshObj = {
+          geometry: null,
+          materials: material,
+          mesh: group,
+          config: "cutSurface"
+        };
+
+      scene.add(group);
+      meshes["cutSurfaces"] = meshObj;
 
     });
     return group
   }
 
+  // refreshes mesh positions based on current uniforms
+  // notes: mesh height = 10 * Y_SCALE = 30, max radius = 38
+  updateMeshPositions() {
+    if (this.meshRefs.hueMinPlane) {
+      this.meshRefs.hueMinPlane.position.y = 5 * Y_SCALE;
+      this.meshRefs.hueMinPlane.rotation.y = - this.uniforms.hueMin.value;
+      this.meshRefs.hueMinPlane.position.z = 19 * Math.sin(this.uniforms.hueMin.value);
+      this.meshRefs.hueMinPlane.position.x = 19 * Math.cos(this.uniforms.hueMin.value);
+    }
+
+    if (this.meshRefs.hueMaxPlane) {
+      this.meshRefs.hueMaxPlane.position.y = 5 * Y_SCALE;
+      this.meshRefs.hueMaxPlane.rotation.y = - this.uniforms.hueMax.value;
+      this.meshRefs.hueMaxPlane.position.z = 19 * Math.sin(this.uniforms.hueMax.value);
+      this.meshRefs.hueMaxPlane.position.x = 19 * Math.cos(this.uniforms.hueMax.value);
+    }
+
+    if (this.meshRefs.valueMinPlane) {
+      this.meshRefs.valueMinPlane.rotation.x = Math.PI / 2;
+      this.meshRefs.valueMinPlane.position.y = this.uniforms.valueMin.value * Y_SCALE;
+    }
+
+    if (this.meshRefs.valueMaxPlane) {
+      this.meshRefs.valueMaxPlane.rotation.x = Math.PI / 2;
+      this.meshRefs.valueMaxPlane.position.y = this.uniforms.valueMax.value * Y_SCALE;
+    }
+
+    // for radius changes, we need to re create the geometry
+    if (this.meshRefs.chromaMinCyl) {
+      this.updateCylinderGeometry(this.meshRefs.chromaMinCyl, this.uniforms.chromaMin.value);
+    }
+
+    if (this.meshRefs.chromaMaxCyl) {
+      this.updateCylinderGeometry(this.meshRefs.chromaMaxCyl, this.uniforms.chromaMax.value);
+    }
+  }
+
+  // create new cylinder geometry when radius changes
+  updateCylinderGeometry(cylinderMesh, radius) {
+    cylinderMesh.geometry.dispose();
+    cylinderMesh.geometry = new THREE.CylinderGeometry(
+      radius, radius, 10 * this.Y_SCALE, 64, 1, true
+    );
+  }
+
   setHueRange(min, max) {
     this.uniforms.hueMin.value = min * Math.PI / 180;
     this.uniforms.hueMax.value = max * Math.PI / 180;
+    this.updateMeshPositions();
   }
 
   setChromaRange(min, max) {
     this.uniforms.chromaMin.value = min;
     this.uniforms.chromaMax.value = max;
+    this.updateMeshPositions();
   }
 
   setValueRange(min, max) {
     this.uniforms.valueMin.value = min;
     this.uniforms.valueMax.value = max;
+    this.updateMeshPositions();
   }
 
   toggleLighting() {
