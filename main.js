@@ -348,10 +348,18 @@ class Slicer {
 
   // create new cylinder geometry when radius changes
   updateCylinderGeometry(cylinderMesh, radius) {
-    cylinderMesh.geometry.dispose();
-    cylinderMesh.geometry = new THREE.CylinderGeometry(
-      radius, radius, 10 * this.Y_SCALE, 64, 1, true
+    // only update if radius has changed
+    const currentRadius = cylinderMesh.geometry.parameters?.radiusTop
+    if (currentRadius === radius) {
+      return;
+    }
+    // assign new geometry before disposing
+    const oldGeometry = cylinderMesh.geometry;
+    const newGeometry = new THREE.CylinderGeometry(
+      radius, radius, 10 * Y_SCALE, 64, 1, true
     );
+    cylinderMesh.geometry = newGeometry;
+    oldGeometry.dispose();
   }
 
   setHueRange(min, max) {
