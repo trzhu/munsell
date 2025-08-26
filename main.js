@@ -18,7 +18,7 @@ const meshes = {};
 const sceneConfigs = {
   default: {
     name: "Volume",
-    visible: ["shell", "cutSurfaces"],
+    visible: ["shell", "cutSurfaces", "stencil"],
     hidden: ["pointcloud_interpolated", "pointcloud_original"],
   },
   pointCloud: {
@@ -28,7 +28,8 @@ const sceneConfigs = {
   },
   debug: {
     name: "Debug",
-    visible: ["cutSurfaces"],
+    visible: ["shell", "cutSurfaces"],
+    // visible: ["cutSurfaces", "stencil"],
     // visible: ["pointcloud_interpolated"],
     hidden: ["shell", "pointcloud_original"]
   }
@@ -56,11 +57,19 @@ function initScene() {
     5000
   );
 
-  // renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  // init and configurerenderer
+  renderer = new THREE.WebGLRenderer({ 
+    stencil: true,
+    antialias: true,
+    alpha: false
+  });
   renderer.localClippingEnabled = true;
-  document.getElementById("render-container").appendChild(renderer.domElement);
 
+  // handle clearing manually (needed for stencil buffer)
+  renderer.autoClear = false;
+  renderer.setClearColor(0x000000, 1.0);
+  container.appendChild(renderer.domElement);
+  
   // controls
   controls = new OrbitControls(camera, renderer.domElement);
   // TODO: might need custom pan controls if I want the panning behaviour i want
@@ -142,19 +151,27 @@ function switchScene(sceneKey) {
 
   if (!config) return;
 
-  // Hide all meshes first
-  Object.keys(meshes).forEach((meshName) => {
+  scene.clear();
+
+  config.visible.forEach((meshName) => {
     if (meshes[meshName] && meshes[meshName].mesh) {
-      meshes[meshName].mesh.visible = false;
+      scene.add(meshes[meshName].mesh);
     }
   });
 
-  // Show only the meshes specified in the scene config
-  config.visible.forEach((meshName) => {
-    if (meshes[meshName] && meshes[meshName].mesh) {
-      meshes[meshName].mesh.visible = true;
-    }
-  });
+  // // hide all meshes
+  // Object.keys(meshes).forEach((meshName) => {
+  //   if (meshes[meshName] && meshes[meshName].mesh) {
+  //     meshes[meshName].mesh.visible = false;
+  //   }
+  // });
+
+  // // show only the meshes specified in the scene config
+  // config.visible.forEach((meshName) => {
+  //   if (meshes[meshName] && meshes[meshName].mesh) {
+  //     meshes[meshName].mesh.visible = true;
+  //   }
+  // });
 
   const toggleLightButton = document.getElementById("toggle-light");
   const toggleRGBButton = document.getElementById("toggle-rgb");
@@ -165,7 +182,6 @@ function switchScene(sceneKey) {
   } else if (sceneKey === "pointCloud") {
     toggleLightButton.style.display = "none";
     toggleRGBButton.style.display = "block";
-    
   }
 }
 
@@ -233,9 +249,30 @@ class Slicer {
       fragmentShader = shaders.meshFragment;
       side = THREE.FrontSide;
     } else if (type === "cutSurface") {
-      vertexShader = shaders.sliceVertex;
-      fragmentShader = shaders.sliceFragment;
-      side = THREE.DoubleSide;
+
+      const cutMaterial = new THREE.ShaderMaterial({
+        colorWrite: true,
+        vertexShader: shaders.sliceVertex,
+        fragmentShader: shaders.sliceFragment,
+        uniforms: this.uniforms,
+        transparent: true,
+        side: THREE.DoubleSide,
+        // BRUH if its true it doesnt work if its false it looks bad what do i do
+        depthTest: false,
+        depthWrite: false,
+        // needs to be true or it wont even READ from the stencil buffer correctly
+        stencilWrite: true,
+        // = 1 inside the silhouette of the stencil
+        stencilRef: 1,
+        stencilFunc: THREE.EqualStencilFunc,
+        // dont care about this other stuff
+        stencilFail: THREE.KeepStencilOp,
+        stencilZPass: THREE.KeepStencilOp,
+        stencilZFail: THREE.KeepStencilOp,
+        
+      });
+      return cutMaterial;
+
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -292,7 +329,9 @@ class Slicer {
 
       // add all meshes to geometry group
       Object.values(this.meshRefs).forEach(mesh => {
-        if (mesh) group.add(mesh);
+        if (mesh) {
+          group.add(mesh);
+        }
       });
       
       const meshObj = {
@@ -301,6 +340,10 @@ class Slicer {
           mesh: group,
           config: "cutSurface"
         };
+
+      // HELP ARE THESE DOING ANYTHING??? 
+      group.renderOrder = -1;
+      // group.stencilTest = true; // I DONT THINK THIS IS NEEDED BUT IDK ANYMORE
 
       scene.add(group);
       meshes["cutSurfaces"] = meshObj;
@@ -387,6 +430,57 @@ class Slicer {
   toggleRGB() {
     this.uniforms.showOutsideRGB.value = 1 - this.uniforms.showOutsideRGB.value;
   }
+}
+
+function initStencil(shell) {
+  const stencilMaterial = new THREE.ShaderMaterial({
+    vertexShader: `
+      void main() {
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      void main() {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); // transparent
+      }
+    `,
+    colorWrite: false,
+    depthWrite: false,
+    depthTest: false,
+    stencilWrite: true,
+    // set stencil buffer to 1 inside the silhouette of the stencil
+    stencilRef: 1,
+    stencilFunc: THREE.AlwaysStencilFunc,
+    // only care about the silhouette, so set it to 1 no matter what for these other things
+    stencilFail: THREE.ReplaceStencilOp,
+    stencilZFail: THREE.ReplaceStencilOp,
+    stencilZPass: THREE.ReplaceStencilOp,
+    side: THREE.DoubleSide,
+  });
+
+  // shape of the stencil mesh is a clone of the original
+  const stencilMesh = shell.mesh.clone();
+  stencilMesh.stencilWrite = true;
+
+  stencilMesh.material = stencilMaterial;
+  stencilMesh.renderOrder = -2;
+  
+  // HELPPPPP THE SHELL MESH ISNT APPEARING
+  // EVEN THOUGH IT SHOULD HAVE THE LAST RENDER ORDER?
+  // IS THAT NORMAL?
+  shell.mesh.renderOrder = 0;
+  
+  scene.add(stencilMesh);
+
+  const meshObj = {
+        geometry: null,
+        materials: stencilMaterial,
+        mesh: stencilMesh,
+        config: "stencil"
+      };
+  meshes["stencil"] = meshObj;
+  
+  return stencilMesh;
 }
 
 class CircularSlider {
@@ -840,6 +934,7 @@ function loadMeshes() {
 
       // After all meshes are loaded, set the default scene
       if (loadedCount === totalMeshes) {
+        initStencil(meshes["shell"]);
         switchScene("default");
       }
     });
@@ -891,6 +986,8 @@ function animate() {
     }
   }
 
+  // clear color, depth, & stencil buffers
+  renderer.clear(true, true, true); 
   renderer.render(scene, camera);
 
   controls.update();
@@ -918,7 +1015,7 @@ async function load3DTexture(filename, size) {
   return texture;
 }
 
-async function main() {
+function main() {
   initScene();
   slicer = new Slicer();
   loadMeshes();
