@@ -224,9 +224,7 @@ def to_mesh(df_3d):
     return vertices, faces
 
 # new interpolate using LinearNDInterpolator
-# TODO: still some bugs where some layers are missing
-# and handling of caps is awful
-def interpolate(df, df_all = None, hue_steps = 2, value_steps=3, chroma_steps=2):
+def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
     """
     hue_steps : int
         Number of subdivisions between adjacent hue samples (of the same value and chroma)
@@ -440,22 +438,26 @@ def original():
     df_3d.to_csv("munsell_3d.csv", index=False)
     print("saved to munsell_3d.csv")
     
-    # create a point cloud
-    vertices = to_pointcloud(df_3d)
-    write_ply(vertices, [], "munsell_pointcloud.ply")
+    # # create a point cloud
+    # vertices = to_pointcloud(df_3d)
+    # write_ply(vertices, [], "munsell_pointcloud.ply")
     
     # create a "shell" mesh
     outer_vertices, faces = to_mesh(df_3d)
     write_ply(outer_vertices, faces, "munsell_mesh.ply")
 
 
+
 def main():
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    df_3d_og = pd.read_csv("munsell_3d_original.csv", index_col=False)
+    outer_vertices, faces = to_mesh(df_3d_og)
+    write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
-    df_interpolated = interpolate(df_processed)
-    df_interpolated.to_csv("munsell_interpolated.csv", index=False)
-    print("saved to munsell_interpolated.csv")
+    # df_interpolated = interpolate(df_processed)
+    # df_interpolated.to_csv("munsell_interpolated.csv", index=False)
+    # print("saved to munsell_interpolated.csv")
     
+    df_interpolated = pd.read_csv("munsell_interpolated.csv", index_col=False)
     df_3d = to_3d_coordinates(df_interpolated)
     df_3d.to_csv("munsell_3d.csv", index=False)
     print("saved to munsell_3d.csv")
@@ -463,10 +465,6 @@ def main():
     # create a point cloud
     vertices = to_pointcloud(df_3d)
     write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
-    
-    # create a "shell" mesh
-    outer_vertices, faces = to_mesh(df_3d)
-    write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
     print(":)")
     
