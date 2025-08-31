@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import re, urllib.request
+import json
 from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
 from collections import defaultdict
@@ -279,6 +280,8 @@ def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
     for (hue, value), group in df_augmented.groupby(["HueDeg", "Value"]):
         max_chroma[(hue, value)] = group["Chroma"].max()
         
+    write_json(max_chroma)
+        
     # original hue/value/chroma spacing is 9, 1, 2 
     hue_stepsize, value_stepsize, chroma_stepsize = 9/hue_steps, 1/value_steps, 2/chroma_steps
     
@@ -415,6 +418,23 @@ def write_ply(vertices, faces, filename):
         for face in faces:
             f.write(f"3 {' '.join(map(str, face))}\n")
 
+
+# write a dictionary to json to read later
+def write_json(dictionary):
+    # convert from default dict to regular dict
+    d = dict(dictionary)
+
+    nested_dict = {}
+    for (hue, value), chroma in d.items():
+        if hue not in nested_dict:
+            nested_dict[hue] = {}
+        nested_dict[hue][value] = chroma
+    
+    with open('max_chroma.json', 'w') as f:
+        json.dump(nested_dict, f, indent=2)
+    
+    print("wrote to max_chroma.json")
+
 # point cloud of only original dataset
 def to_pointcloud_original():
     df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
@@ -446,25 +466,20 @@ def original():
     outer_vertices, faces = to_mesh(df_3d)
     write_ply(outer_vertices, faces, "munsell_mesh.ply")
 
-
-
 def main():
-    df_3d_og = pd.read_csv("munsell_3d_original.csv", index_col=False)
-    outer_vertices, faces = to_mesh(df_3d_og)
-    write_ply(outer_vertices, faces, "munsell_mesh.ply")
-    
-    # df_interpolated = interpolate(df_processed)
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    df_interpolated = interpolate(df_processed)
     # df_interpolated.to_csv("munsell_interpolated.csv", index=False)
     # print("saved to munsell_interpolated.csv")
     
-    df_interpolated = pd.read_csv("munsell_interpolated.csv", index_col=False)
-    df_3d = to_3d_coordinates(df_interpolated)
-    df_3d.to_csv("munsell_3d.csv", index=False)
-    print("saved to munsell_3d.csv")
+    # df_interpolated = pd.read_csv("munsell_interpolated.csv", index_col=False)
+    # df_3d = to_3d_coordinates(df_interpolated)
+    # df_3d.to_csv("munsell_3d.csv", index=False)
+    # print("saved to munsell_3d.csv")
     
-    # create a point cloud
-    vertices = to_pointcloud(df_3d)
-    write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
+    # create a dense point cloud
+    # vertices = to_pointcloud(df_3d)
+    # write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
     
     print(":)")
     
