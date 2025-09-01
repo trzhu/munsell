@@ -199,17 +199,20 @@ class Slicer {
     };
 
     this.shadersPromise = this.loadShaders();
-    // group of mesh geometries
-    this.group = this.updateCutSurfaces();
+    this.loadTextures();
+
     // load max chroma dictionary from jsons
     this.maxChromaPromise = this.loadMaxChromaDict();
     this.maxChroma = null;
-
     this.maxChromaPromise.then((data) => {
       this.maxChroma = data;
     });
 
-    this.loadTextures();
+    // pointer for future cut surface material
+    this.cutSurfaceMaterial = null;
+
+    // group of mesh geometries
+    this.group = this.updateCutSurfaces();
 
     // individual mesh references
     this.meshRefs = {
@@ -257,6 +260,11 @@ class Slicer {
   async getMaterial(type) {
     const shaders = await this.shadersPromise;
 
+    // return cached cutSurface material if it exists
+    if (type === "cutSurface" && this.cutSurfaceMaterial) {
+      return this.cutSurfaceMaterial;
+    }
+
     let vertexShader, fragmentShader, side;
     if (type === "points") {
       vertexShader = shaders.pointsVertex;
@@ -275,13 +283,20 @@ class Slicer {
       throw new Error(`Unsupported type: ${type}`);
     }
 
-    return new THREE.ShaderMaterial({
+    const material = new THREE.ShaderMaterial({
       vertexShader,
       fragmentShader,
       uniforms: this.uniforms,
       transparent: true,
       side: side,
     });
+
+    // cache cut surface material bc it needs to be retrieved multiple times
+    if (type === "cutSurface") {
+      this.cutSurfaceMaterial = material;
+    }
+    
+    return material;
   }
 
   async loadMaxChromaDict() {
@@ -385,6 +400,11 @@ class Slicer {
         config: "cutSurface",
       };
 
+      // copy rotation of shell mesh
+      if (meshes["shell"] && meshes["shell"].mesh) {
+        group.rotation.copy(meshes["shell"].mesh.rotation);
+      }
+
       scene.add(group);
       meshes["cutSurfaces"] = meshObj;
     });
@@ -399,60 +419,56 @@ class Slicer {
   // 2 hue planes (pie slice)
   // max value, min value are always vertices.
   huePlanes() {
+
+    // makes it easier to read
+    // minC, maxC, minV, maxV apply to both hue min and hue max planes
+    const minC = this.uniforms.chromaMin.value;
+    const maxC = this.uniforms.chromaMax.value;
+    const minV = this.uniforms.valueMin.value;
+    const maxV = this.uniforms.valueMax.value;
+
     // TEMP: ROUND HUE before lerp is ready
     const hMin =
       9 * Math.round((this.uniforms.hueMin.value * 180) / Math.PI / 9);
     const hMax =
       9 * Math.round((this.uniforms.hueMax.value * 180) / Math.PI / 9);
-    // temp as well - later this is only inside the loop
-    const vMin = Math.ceil(this.uniforms.valueMin.value);
-    const vMax = Math.floor(this.uniforms.valueMax.value);
 
     const minVertices = [];
     const maxVertices = [];
 
-    console.log("hMin:", hMin, "hMax:", hMax);
-    console.log("vMin:", vMin, "vMax:", vMax);
+    // console.log("hMin:", hMin, "hMax:", hMax);
+    // console.log("vMin:", minV, "vMax:", maxV);
 
-    // todo: add light value grayscale point
-    minVertices.push();
-
-    // todo: vertices at start/end hues are interpolated
-
-    // remaining vertices are directly from data
-    for (let v = vMin; v < vMax; v += 1) {
-      // const cMin = this.maxChroma[hMin]?.[v] || 0;
-      // const cMax = this.maxChroma[hMax]?.[v] || 0;
-
-      let cMin, cMax;
-      if (!this.maxChroma[hMin]) {
-        console.log(`maxChroma[${hMin}] doesn't exist`);
-        cMin = 0;
-      } else if (this.maxChroma[hMin][v] === undefined) {
-        console.log(`maxChroma[${hMin}][${v}] doesn't exist`);
-        cMin = 0;
-      } else {
-        cMin = this.maxChroma[hMin][v];
-      }
-
-      if (!this.maxChroma[hMax]) {
-        console.log(`maxChroma[${hMax}] doesn't exist`);
-        cMax = 0;
-      } else if (this.maxChroma[hMax][v] === undefined) {
-        console.log(`maxChroma[${hMax}][${v}] doesn't exist`);
-        cMax = 0;
-      } else {
-        cMax = this.maxChroma[hMax][v];
-      }
-
-      minVertices.push(this.HVC_to_XYZ(hMin, v, cMin));
-      maxVertices.push(this.HVC_to_XYZ(hMax, v, cMax));
+    // min value min chroma point
+    // todo: actually this needs to depend on irregular edge start
+    if (minV > 0) {
+      minVertices.push(this.HVC_to_XYZ(hMin, minV, minC));
+      maxVertices.push(this.HVC_to_XYZ(hMax, minV, minC));
     }
-    // console.log("min: ", minVertices);
-    // console.log("max: ", maxVertices);
 
-    // todo: interpolated end hue
-    // todo: add dark value grayscale point
+    // irregular edge start hue (may be interpolated)
+    minVertices.push(this.HVC_to_XYZ(hMin, minV, this.getMaxChroma(hMin, minV)));
+    maxVertices.push(this.HVC_to_XYZ(hMax, minV, this.getMaxChroma(hMax, minV)));
+
+    // for in-between vertices, used grid points directly
+    for (let v = Math.ceil(minV); v < maxV; v += 1) {
+      const c_hMin = this.maxChroma[hMin]?.[v] || 0;
+      const c_hMax = this.maxChroma[hMax]?.[v] || 0;
+      // clamp to be in between minC and maxC
+      minVertices.push(this.HVC_to_XYZ(hMin, v, clamp(c_hMin, minC, maxC)));
+      maxVertices.push(this.HVC_to_XYZ(hMax, v, clamp(c_hMax, minC, maxC)));
+    }
+
+    // irregular edge end hue
+    minVertices.push(this.HVC_to_XYZ(hMin, maxV, this.getMaxChroma(hMin, maxV)));
+    maxVertices.push(this.HVC_to_XYZ(hMax, maxV, this.getMaxChroma(hMax, maxV)));
+    
+    // max value min chroma point
+    // todo: actually this neesd to depend on irregular edge end
+    if (maxV < 10) {
+      minVertices.push(this.HVC_to_XYZ(hMin, maxV, minC));
+      maxVertices.push(this.HVC_to_XYZ(hMax, maxV, minC));
+    }
 
     // convert vertex lists to geometry
     return {
@@ -516,13 +532,34 @@ class Slicer {
 
   // todo: might need to account for triangles
   // (the line goes from upper left to lower right)
-  lerpMaxChroma(targetHue, targetValue) {}
+  getMaxChroma(hue, value) {
+    // edge cases white and black
+    if (value <= 1 || value >= 10) {
+        return 0;
+    }
+
+    // if already on the grid
+    if (this.maxChroma[hue] && this.maxChroma[hue][value]) {
+      return this.maxChroma[hue][value];
+    }
+
+    //oopsie
+    return 0;
+    
+  }
+
+}
+
+function clamp(num, min, max) {
+  return Math.min(Math.max(num, min), max)
 }
 
 /**
  * creates a planar polygon from vertices arranged in a loop
  * using triangle fan topology (all triangles share the first vertex as a common point)
  * WINDING ORDER: DEFAULTS to ccw (when viewed from the direction of the normal)
+ * TODO: don't use triangle fan topology, it doesn't handle concavities well
+ * maybe extend horizontal rectangles 
  */
 function createPolygonGeometry(vertices, reverseWinding = false) {
   console.log("vertices in create polygon geometry: ", vertices);
@@ -1104,8 +1141,8 @@ function animate() {
     }
   }
 
-  // clear color, depth, & stencil buffers
-  renderer.clear(true, true, true);
+  // // clear color, depth, & stencil buffers
+  // renderer.clear(true, true, true);
   renderer.render(scene, camera);
 
   controls.update();
