@@ -11,6 +11,7 @@ const Y_SCALE = 3;
 
 // dictionary of meshes
 // keys: "shell", "pointcloud", "pointcloud_original, cutSurfaces"
+// todo: maybe just store the meshes instead of the whole meshobj. i dont bother with any of the other fields anyways
 const meshes = {};
 
 
@@ -18,7 +19,7 @@ const meshes = {};
 const sceneConfigs = {
   default: {
     name: "Volume",
-    visible: ["shell", "cutSurfaces", "stencil"],
+    visible: ["shell", "cutSurfaces"],
     hidden: ["pointcloud_interpolated", "pointcloud_original"],
   },
   pointCloud: {
@@ -28,8 +29,8 @@ const sceneConfigs = {
   },
   debug: {
     name: "Debug",
+    // visible: ["debug"],
     visible: ["shell", "cutSurfaces"],
-    // visible: ["cutSurfaces", "stencil"],
     // visible: ["pointcloud_interpolated"],
     hidden: ["shell", "pointcloud_original"]
   }
@@ -202,7 +203,15 @@ class Slicer {
 
     this.shadersPromise = this.loadShaders();
     // group of mesh geometries
-    this.group = this.initCutSurfaces();
+    this.group = this.updateCutSurfaces();
+    // load max chroma dictionary from jsons
+    this.maxChromaPromise = this.loadMaxChromaDict();
+    this.maxChroma = null;
+
+    this.maxChromaPromise.then(data => {
+      this.maxChroma = data;
+    });
+
     this.loadTextures();
 
     // individual mesh references
@@ -249,29 +258,10 @@ class Slicer {
       fragmentShader = shaders.meshFragment;
       side = THREE.FrontSide;
     } else if (type === "cutSurface") {
-
-      const cutMaterial = new THREE.ShaderMaterial({
-        colorWrite: true,
-        vertexShader: shaders.sliceVertex,
-        fragmentShader: shaders.sliceFragment,
-        uniforms: this.uniforms,
-        transparent: true,
-        side: THREE.DoubleSide,
-        // BRUH if its true it doesnt work if its false it looks bad what do i do
-        depthTest: false,
-        depthWrite: false,
-        // needs to be true or it wont even READ from the stencil buffer correctly
-        stencilWrite: true,
-        // = 1 inside the silhouette of the stencil
-        stencilRef: 1,
-        stencilFunc: THREE.EqualStencilFunc,
-        // dont care about this other stuff
-        stencilFail: THREE.KeepStencilOp,
-        stencilZPass: THREE.KeepStencilOp,
-        stencilZFail: THREE.KeepStencilOp,
-        
-      });
-      return cutMaterial;
+      vertexShader = shaders.sliceVertex
+      fragmentShader = shaders.sliceFragment
+      // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way 
+      side = THREE.DoubleSide;
 
     } else {
       throw new Error(`Unsupported type: ${type}`);
@@ -286,141 +276,27 @@ class Slicer {
     });
   }
 
-  initCutSurfaces() {
-    const group = new THREE.Group();
-
-    // dimensions of mesh: height = 3 * Y_SCALE = 30, max radius = 38
-    const huePlaneGeom = new THREE.PlaneGeometry(38, 10 * Y_SCALE);
-    const valuePlaneGeom = new THREE.PlaneGeometry(80, 80);
-
-    const materialPromise = this.getMaterial("cutSurface");
-
-    materialPromise.then((material) => {
-      // hue planes
-      this.meshRefs.hueMinPlane = new THREE.Mesh(huePlaneGeom, material);
-      this.meshRefs.hueMinPlane.position.y = 5 * Y_SCALE; // centre of mesh
-      this.meshRefs.hueMinPlane.rotation.y = this.uniforms.hueMin.value;
-      
-      this.meshRefs.hueMaxPlane = new THREE.Mesh(huePlaneGeom, material);
-      this.meshRefs.hueMaxPlane.position.y = 5 * Y_SCALE; // centre of mesh
-      this.meshRefs.hueMaxPlane.rotation.y = this.uniforms.hueMin.value;
-      
-      // value planes
-      this.meshRefs.valueMinPlane = new THREE.Mesh(valuePlaneGeom, material);
-      this.meshRefs.valueMinPlane.rotation.x = Math.PI / 2;
-
-      this.meshRefs.valueMaxPlane = new THREE.Mesh(valuePlaneGeom, material);
-      this.meshRefs.valueMaxPlane.rotation.x = Math.PI / 2;
-      
-      // chroma cylinders
-      this.meshRefs.chromaMinCyl = new THREE.Mesh(
-        new THREE.CylinderGeometry(this.uniforms.chromaMin.value, this.uniforms.chromaMin.value, 10 * Y_SCALE, 64, 1, true),
-        material
-      );
-      this.meshRefs.chromaMinCyl.position.y = 5 * Y_SCALE;
-
-      this.meshRefs.chromaMaxCyl = new THREE.Mesh(
-        new THREE.CylinderGeometry(this.uniforms.chromaMax.value, this.uniforms.chromaMax.value, 10 * Y_SCALE, 64, 1, true),
-        material
-      );
-      this.meshRefs.chromaMaxCyl.position.y = 5 * Y_SCALE;
-
-      this.updateMeshPositions();
-
-      // add all meshes to geometry group
-      Object.values(this.meshRefs).forEach(mesh => {
-        if (mesh) {
-          group.add(mesh);
-        }
-      });
-      
-      const meshObj = {
-          geometry: null,
-          materials: material,
-          mesh: group,
-          config: "cutSurface"
-        };
-
-      // HELP ARE THESE DOING ANYTHING??? 
-      group.renderOrder = -1;
-      // group.stencilTest = true; // I DONT THINK THIS IS NEEDED BUT IDK ANYMORE
-
-      scene.add(group);
-      meshes["cutSurfaces"] = meshObj;
-
-    });
-    return group
+  async loadMaxChromaDict() {
+    const response = await fetch("max_chroma.json");
+    return await response.json();
   }
-
-  // refreshes mesh positions based on current uniforms
-  // notes: mesh height = 10 * Y_SCALE = 30, max radius = 38
-  updateMeshPositions() {
-    if (this.meshRefs.hueMinPlane) {
-      this.meshRefs.hueMinPlane.position.y = 5 * Y_SCALE;
-      this.meshRefs.hueMinPlane.rotation.y = - this.uniforms.hueMin.value;
-      this.meshRefs.hueMinPlane.position.z = 19 * Math.sin(this.uniforms.hueMin.value);
-      this.meshRefs.hueMinPlane.position.x = 19 * Math.cos(this.uniforms.hueMin.value);
-    }
-
-    if (this.meshRefs.hueMaxPlane) {
-      this.meshRefs.hueMaxPlane.position.y = 5 * Y_SCALE;
-      this.meshRefs.hueMaxPlane.rotation.y = - this.uniforms.hueMax.value;
-      this.meshRefs.hueMaxPlane.position.z = 19 * Math.sin(this.uniforms.hueMax.value);
-      this.meshRefs.hueMaxPlane.position.x = 19 * Math.cos(this.uniforms.hueMax.value);
-    }
-
-    if (this.meshRefs.valueMinPlane) {
-      this.meshRefs.valueMinPlane.rotation.x = Math.PI / 2;
-      this.meshRefs.valueMinPlane.position.y = this.uniforms.valueMin.value * Y_SCALE;
-    }
-
-    if (this.meshRefs.valueMaxPlane) {
-      this.meshRefs.valueMaxPlane.rotation.x = Math.PI / 2;
-      this.meshRefs.valueMaxPlane.position.y = this.uniforms.valueMax.value * Y_SCALE;
-    }
-
-    // for radius changes, we need to re create the geometry
-    if (this.meshRefs.chromaMinCyl) {
-      this.updateCylinderGeometry(this.meshRefs.chromaMinCyl, this.uniforms.chromaMin.value);
-    }
-
-    if (this.meshRefs.chromaMaxCyl) {
-      this.updateCylinderGeometry(this.meshRefs.chromaMaxCyl, this.uniforms.chromaMax.value);
-    }
-  }
-
-  // create new cylinder geometry when radius changes
-  updateCylinderGeometry(cylinderMesh, radius) {
-    // only update if radius has changed
-    const currentRadius = cylinderMesh.geometry.parameters?.radiusTop
-    if (currentRadius === radius) {
-      return;
-    }
-    // assign new geometry before disposing
-    const oldGeometry = cylinderMesh.geometry;
-    const newGeometry = new THREE.CylinderGeometry(
-      radius, radius, 10 * Y_SCALE, 64, 1, true
-    );
-    cylinderMesh.geometry = newGeometry;
-    oldGeometry.dispose();
-  }
-
+  
   setHueRange(min, max) {
     this.uniforms.hueMin.value = min * Math.PI / 180;
     this.uniforms.hueMax.value = max * Math.PI / 180;
-    this.updateMeshPositions();
+    this.updateCutSurfaces();
   }
 
   setChromaRange(min, max) {
     this.uniforms.chromaMin.value = min;
     this.uniforms.chromaMax.value = max;
-    this.updateMeshPositions();
+    this.updateCutSurfaces();
   }
 
   setValueRange(min, max) {
     this.uniforms.valueMin.value = min;
     this.uniforms.valueMax.value = max;
-    this.updateMeshPositions();
+    this.updateCutSurfaces();
   }
 
   toggleLighting() {
@@ -430,57 +306,188 @@ class Slicer {
   toggleRGB() {
     this.uniforms.showOutsideRGB.value = 1 - this.uniforms.showOutsideRGB.value;
   }
+
+  // updates cut surface positions when min/max h,v,c change
+  updateCutSurfaces() {
+    if (!this.maxChroma) {
+      console.log("maxChroma still loading")
+      return;
+    }
+    const group = new THREE.Group();
+    
+    // todo: dispose of old surfaces first
+
+    const huePlanes = this.huePlanes();
+    this.meshRefs.hueMinPlane = huePlanes.minPlane;
+    this.meshRefs.hueMaxPlane = huePlanes.maxPlane;
+
+    const valuePlanes = this.valuePlanes();
+    this.meshRefs.valueMinPlane = valuePlanes.minPlane;
+    this.meshRefs.valueMaxPlane = valuePlanes.maxPlane;
+
+    const chromaCyls = this.chromaCylinders();
+
+    Object.values(this.meshRefs).forEach(mesh => {
+      if (mesh) {
+        group.add(mesh);
+      }
+    });
+    
+    const meshObj = {
+        geometry: null,
+        materials: null, // todo
+        mesh: group,
+        config: "cutSurface"
+      };
+
+    scene.add(group);
+    meshes["cutSurfaces"] = meshObj;
+
+    return group
+
+  }
+
+  // TODO: 
+  // for each cut surface, create geometry for it and hook it up 
+  // for the first and last vertices of the irregular edge, will need to lerp
+
+  // 2 hue planes (pie slice)
+  // max value, min value are always vertices. 
+  huePlanes() {
+
+    // TEMP: ROUND HUE before lerp is ready
+    const hMin = 9 * Math.round(this.uniforms.hueMin / 9);
+    const hMax = 9 * Math.round(this.uniforms.hueMax / 9);
+    console.log(hMin);
+
+    const minVertices = [];
+    const maxVertices = [];
+
+    // add light value grayscale point
+
+    // vertices at start/end hues are interpolated
+
+    // remaining vertices are directly from data
+    const vMin = Math.ceil(this.uniforms.valueMin);
+    const vMax = Math.floor(this.uniforms.valueMax);
+    for (let v = vMin; v < vMax; v += 1) {
+        minVertices.push(this.HVC_to_XYZ(hMin, v, this.maxChroma[v][hMin]));
+        maxVertices.push(this.HVC_to_XYZ(hMax, v, this.maxChroma[v][hMax]));
+    }
+
+    // add dark value grayscale point
+
+    // convert vertex lists to geometry
+    return {
+      minPlane: createPolygonGeometry(minVertices),
+      maxPlane: createPolygonGeometry(maxVertices, true)
+    }
+  }
+  
+  // 2 value planes (horizontal)
+  valuePlanes() {
+    const minVertices = [];
+    const maxVertices = [];
+
+    // if hue start != hue end, the center vertex must be included
+    if (this.uniforms.hueMin.value != this.uniforms.hueMax.value) {
+      // minVertices.push()
+    }
+
+    // todo 
+
+    return {
+      minPlane: createPolygonGeometry(minVertices),
+      maxPlane: createPolygonGeometry(maxVertices, true)
+    }
+  }
+
+  chromaCylinders() {
+    const minTopVertices = [];
+    const minBotVertices = [];
+    const maxTopVertices = [];
+    const maxBotVertices = [];
+
+    // todo
+
+    return {
+      minCyl: createCylinderGeometry(minTopVertices, minBotVertices, false),
+      maxCyl: createCylinderGeometry(maxTopVertices, maxBotVertices)
+    }
+  }
+
+  // cylindrical to cartesian coordinate helpers
+  HVC_to_XYZ(h, v, c) {
+    const hueRadians = h * Math.PI / 180.0;
+    const x = c * Math.cos(hueRadians);
+    const y = v;
+    const z = c * Math.sin(hueRadians);
+    
+    return { x, y, z };
+  }
+
+  XYZ_to_HVC(x, y, z) {
+    const v = y;
+    const c = Math.sqrt(x * x + z * z);
+    let h = Math.atan2(z, x) * 180.0 / Math.PI;
+    if (h < 0) { 
+        h += 360;
+    }
+    
+    return { h, v, c };
+  }
+
+  // todo: might need to account for triangles
+  lerpMaxChroma(targetHue, targetValue) {
+    
+  }
+
+  
 }
 
-function initStencil(shell) {
-  const stencilMaterial = new THREE.ShaderMaterial({
-    vertexShader: `
-      void main() {
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      void main() {
-        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); // transparent
-      }
-    `,
-    colorWrite: false,
-    depthWrite: false,
-    depthTest: false,
-    stencilWrite: true,
-    // set stencil buffer to 1 inside the silhouette of the stencil
-    stencilRef: 1,
-    stencilFunc: THREE.AlwaysStencilFunc,
-    // only care about the silhouette, so set it to 1 no matter what for these other things
-    stencilFail: THREE.ReplaceStencilOp,
-    stencilZFail: THREE.ReplaceStencilOp,
-    stencilZPass: THREE.ReplaceStencilOp,
-    side: THREE.DoubleSide,
-  });
+/**
+ * creates a planar polygon from vertices arranged in a loop 
+ * using triangle fan topology (all triangles share the first vertex as a common point)
+ * WINDING ORDER: DEFAULTS to ccw (when viewed from the direction of the normal)
+ */
+function createPolygonGeometry(vertices, reverseWinding = false) {
+    const vertexCount = vertices.length;
+    
+    if (vertexCount < 3) {
+        throw new Error('Need at least 3 vertices to create a loop');
+    }
 
-  // shape of the stencil mesh is a clone of the original
-  const stencilMesh = shell.mesh.clone();
-  stencilMesh.stencilWrite = true;
+    // flatten vertices array into positions array (expected by THREE)
+    const positions = [];
+    vertices.forEach(vertex => {
+        positions.push(vertex.x, vertex.y, vertex.z);
+    });
+    
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    
+    // triangle fan indices (all triangles share vertex 0)
+    const indices = [];
+    for (let i = 1; i < vertexCount - 1; i++) {
+        if (reverseWinding) {
+            // CW winding
+            indices.push(0, i + 1, i);
+        } else {
+            // CCW winding
+            indices.push(0, i, i + 1);
+        }
+    }
+    console.log(vertices);
+    console.log(indices);
+    
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    
+    return geometry;
+}
 
-  stencilMesh.material = stencilMaterial;
-  stencilMesh.renderOrder = -2;
-  
-  // HELPPPPP THE SHELL MESH ISNT APPEARING
-  // EVEN THOUGH IT SHOULD HAVE THE LAST RENDER ORDER?
-  // IS THAT NORMAL?
-  shell.mesh.renderOrder = 0;
-  
-  scene.add(stencilMesh);
-
-  const meshObj = {
-        geometry: null,
-        materials: stencilMaterial,
-        mesh: stencilMesh,
-        config: "stencil"
-      };
-  meshes["stencil"] = meshObj;
-  
-  return stencilMesh;
+function createCylinderGeometry(topPositions, botPositions, normalOutward = true) {
+  // todo
 }
 
 class CircularSlider {
@@ -934,7 +941,7 @@ function loadMeshes() {
 
       // After all meshes are loaded, set the default scene
       if (loadedCount === totalMeshes) {
-        initStencil(meshes["shell"]);
+        // initStencil(meshes["shell"]);
         switchScene("default");
       }
     });
