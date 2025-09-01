@@ -14,7 +14,6 @@ const Y_SCALE = 3;
 // todo: maybe just store the meshes instead of the whole meshobj. i dont bother with any of the other fields anyways
 const meshes = {};
 
-
 // Scene configurations
 const sceneConfigs = {
   default: {
@@ -32,11 +31,9 @@ const sceneConfigs = {
     // visible: ["debug"],
     visible: ["shell", "cutSurfaces"],
     // visible: ["pointcloud_interpolated"],
-    hidden: ["shell", "pointcloud_original"]
-  }
+    hidden: ["shell", "pointcloud_original"],
+  },
 };
-
-
 
 // init scene + camera + lights
 function initScene() {
@@ -59,10 +56,10 @@ function initScene() {
   );
 
   // init and configurerenderer
-  renderer = new THREE.WebGLRenderer({ 
+  renderer = new THREE.WebGLRenderer({
     stencil: true,
     antialias: true,
-    alpha: false
+    alpha: false,
   });
   renderer.localClippingEnabled = true;
 
@@ -70,7 +67,7 @@ function initScene() {
   renderer.autoClear = false;
   renderer.setClearColor(0x000000, 1.0);
   container.appendChild(renderer.domElement);
-  
+
   // controls
   controls = new OrbitControls(camera, renderer.domElement);
   // TODO: might need custom pan controls if I want the panning behaviour i want
@@ -112,7 +109,7 @@ function initUI() {
       toggleRGBButton.textContent = "Show all colours";
     }
   });
-  
+
   /********** SLIDERS ************/
   // circular hue slider
   const circularHueSlider = new CircularSlider("hue-slider");
@@ -134,7 +131,7 @@ function initUI() {
     slicer.setChromaRange(range.start, range.end);
   };
   // idk initalize it to some random colors
-  chromaSlider.setGradient("#808080", "#ff9b00")
+  chromaSlider.setGradient("#808080", "#ff9b00");
   chromaSlider.onChange(chromaSlider.getValues());
 
   // set scene
@@ -195,10 +192,10 @@ class Slicer {
       chromaMax: { value: 38.0 },
       valueMin: { value: 0.0 },
       valueMax: { value: 10.0 },
-      uSize: {value: 10.0}, // point size for point clouds
-      useLighting: {value: 0.0},
-      showOutsideRGB: {value: 1.0},
-      interiorTexture: {value: null}
+      uSize: { value: 10.0 }, // point size for point clouds
+      useLighting: { value: 0.0 },
+      showOutsideRGB: { value: 1.0 },
+      interiorTexture: { value: null },
     };
 
     this.shadersPromise = this.loadShaders();
@@ -208,7 +205,7 @@ class Slicer {
     this.maxChromaPromise = this.loadMaxChromaDict();
     this.maxChroma = null;
 
-    this.maxChromaPromise.then(data => {
+    this.maxChromaPromise.then((data) => {
       this.maxChroma = data;
     });
 
@@ -221,23 +218,35 @@ class Slicer {
       valueMinPlane: null,
       valueMaxPlane: null,
       chromaMinCyl: null,
-      chromaMaxCyl: null
+      chromaMaxCyl: null,
     };
   }
 
-
   async loadShaders() {
-    const [meshVertex, meshFragment, pointsVertex, pointsFragment, sliceVertex, sliceFragment] =
-      await Promise.all([
-        fetch("./shaders/mesh_vertex.glsl").then((r) => r.text()),
-        fetch("./shaders/mesh_fragment.glsl").then((r) => r.text()),
-        fetch("./shaders/points_vertex.glsl").then((r) => r.text()),
-        fetch("./shaders/points_fragment.glsl").then((r) => r.text()),
-        fetch("./shaders/slice_vertex.glsl").then((r) => r.text()),
-        fetch("./shaders/slice_fragment.glsl").then((r) => r.text()),
-      ]);
+    const [
+      meshVertex,
+      meshFragment,
+      pointsVertex,
+      pointsFragment,
+      sliceVertex,
+      sliceFragment,
+    ] = await Promise.all([
+      fetch("./shaders/mesh_vertex.glsl").then((r) => r.text()),
+      fetch("./shaders/mesh_fragment.glsl").then((r) => r.text()),
+      fetch("./shaders/points_vertex.glsl").then((r) => r.text()),
+      fetch("./shaders/points_fragment.glsl").then((r) => r.text()),
+      fetch("./shaders/slice_vertex.glsl").then((r) => r.text()),
+      fetch("./shaders/slice_fragment.glsl").then((r) => r.text()),
+    ]);
 
-    return { meshVertex, meshFragment, pointsVertex, pointsFragment, sliceVertex, sliceFragment };
+    return {
+      meshVertex,
+      meshFragment,
+      pointsVertex,
+      pointsFragment,
+      sliceVertex,
+      sliceFragment,
+    };
   }
 
   async loadTextures() {
@@ -258,11 +267,10 @@ class Slicer {
       fragmentShader = shaders.meshFragment;
       side = THREE.FrontSide;
     } else if (type === "cutSurface") {
-      vertexShader = shaders.sliceVertex
-      fragmentShader = shaders.sliceFragment
-      // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way 
+      vertexShader = shaders.sliceVertex;
+      fragmentShader = shaders.sliceFragment;
+      // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way
       side = THREE.DoubleSide;
-
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -272,18 +280,27 @@ class Slicer {
       fragmentShader,
       uniforms: this.uniforms,
       transparent: true,
-      side: side
+      side: side,
     });
   }
 
   async loadMaxChromaDict() {
     const response = await fetch("max_chroma.json");
-    return await response.json();
+    const data = await response.json();
+
+    return Object.fromEntries(
+      Object.entries(data).map(([h, values]) => [
+        parseFloat(h),
+        Object.fromEntries(
+          Object.entries(values).map(([v, chroma]) => [parseFloat(v), chroma])
+        ),
+      ])
+    );
   }
-  
+
   setHueRange(min, max) {
-    this.uniforms.hueMin.value = min * Math.PI / 180;
-    this.uniforms.hueMax.value = max * Math.PI / 180;
+    this.uniforms.hueMin.value = (min * Math.PI) / 180;
+    this.uniforms.hueMax.value = (max * Math.PI) / 180;
     this.updateCutSurfaces();
   }
 
@@ -310,80 +327,140 @@ class Slicer {
   // updates cut surface positions when min/max h,v,c change
   updateCutSurfaces() {
     if (!this.maxChroma) {
-      console.log("maxChroma still loading")
+      console.log("maxChroma still loading");
       return;
     }
-    const group = new THREE.Group();
-    
-    // todo: dispose of old surfaces first
 
-    const huePlanes = this.huePlanes();
-    this.meshRefs.hueMinPlane = huePlanes.minPlane;
-    this.meshRefs.hueMaxPlane = huePlanes.maxPlane;
+    // dispose of old surfaces
+    if (meshes["cutSurfaces"]) {
+      // remove from scene
+      scene.remove(meshes["cutSurfaces"].mesh);
+      // dispose of both geometries and materials
+      meshes["cutSurfaces"].mesh.traverse((child) => {
+        if (child.geometry) {
+          child.geometry.dispose();
+        }
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((mat) => mat.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+      // clear entry from meshes
+      delete meshes["cutSurfaces"];
+    }
 
-    const valuePlanes = this.valuePlanes();
-    this.meshRefs.valueMinPlane = valuePlanes.minPlane;
-    this.meshRefs.valueMaxPlane = valuePlanes.maxPlane;
-
-    const chromaCyls = this.chromaCylinders();
-
-    Object.values(this.meshRefs).forEach(mesh => {
-      if (mesh) {
-        group.add(mesh);
-      }
+    // references
+    Object.keys(this.meshRefs).forEach((key) => {
+      this.meshRefs[key] = null;
     });
-    
-    const meshObj = {
-        geometry: null,
-        materials: null, // todo
+
+    const group = new THREE.Group();
+
+    const materialPromise = this.getMaterial("cutSurface");
+    materialPromise.then((material) => {
+
+      const huePlanes = this.huePlanes();
+      // not ready for these yet
+      // const valuePlanes = this.valuePlanes();
+      // const chromaCyls = this.chromaCylinders();
+
+      this.meshRefs.hueMinPlane = new THREE.Mesh(huePlanes.minPlane, material);
+      this.meshRefs.hueMaxPlane = new THREE.Mesh(huePlanes.maxPlane, material);
+
+      // this.meshRefs.valueMinPlane
+      // this.meshRefs.valueMaxPlane etc...
+
+      Object.values(this.meshRefs).forEach((mesh) => {
+        if (mesh) {
+          group.add(mesh);
+        }
+      });
+
+      const meshObj = {
+        materials: material,
         mesh: group,
-        config: "cutSurface"
+        config: "cutSurface",
       };
 
-    scene.add(group);
-    meshes["cutSurfaces"] = meshObj;
+      scene.add(group);
+      meshes["cutSurfaces"] = meshObj;
+    });
 
-    return group
-
+    return group;
   }
 
-  // TODO: 
-  // for each cut surface, create geometry for it and hook it up 
+  // TODO:
+  // for each cut surface, create geometry for it and hook it up
   // for the first and last vertices of the irregular edge, will need to lerp
 
   // 2 hue planes (pie slice)
-  // max value, min value are always vertices. 
+  // max value, min value are always vertices.
   huePlanes() {
-
     // TEMP: ROUND HUE before lerp is ready
-    const hMin = 9 * Math.round(this.uniforms.hueMin / 9);
-    const hMax = 9 * Math.round(this.uniforms.hueMax / 9);
-    console.log(hMin);
+    const hMin =
+      9 * Math.round((this.uniforms.hueMin.value * 180) / Math.PI / 9);
+    const hMax =
+      9 * Math.round((this.uniforms.hueMax.value * 180) / Math.PI / 9);
+    // temp as well - later this is only inside the loop
+    const vMin = Math.ceil(this.uniforms.valueMin.value);
+    const vMax = Math.floor(this.uniforms.valueMax.value);
 
     const minVertices = [];
     const maxVertices = [];
 
-    // add light value grayscale point
+    console.log("hMin:", hMin, "hMax:", hMax);
+    console.log("vMin:", vMin, "vMax:", vMax);
 
-    // vertices at start/end hues are interpolated
+    // todo: add light value grayscale point
+    minVertices.push();
+
+    // todo: vertices at start/end hues are interpolated
 
     // remaining vertices are directly from data
-    const vMin = Math.ceil(this.uniforms.valueMin);
-    const vMax = Math.floor(this.uniforms.valueMax);
     for (let v = vMin; v < vMax; v += 1) {
-        minVertices.push(this.HVC_to_XYZ(hMin, v, this.maxChroma[v][hMin]));
-        maxVertices.push(this.HVC_to_XYZ(hMax, v, this.maxChroma[v][hMax]));
-    }
+      // const cMin = this.maxChroma[hMin]?.[v] || 0;
+      // const cMax = this.maxChroma[hMax]?.[v] || 0;
 
-    // add dark value grayscale point
+      let cMin, cMax;
+      if (!this.maxChroma[hMin]) {
+        console.log(`maxChroma[${hMin}] doesn't exist`);
+        cMin = 0;
+      } else if (this.maxChroma[hMin][v] === undefined) {
+        console.log(`maxChroma[${hMin}][${v}] doesn't exist`);
+        cMin = 0;
+      } else {
+        cMin = this.maxChroma[hMin][v];
+      }
+
+      if (!this.maxChroma[hMax]) {
+        console.log(`maxChroma[${hMax}] doesn't exist`);
+        cMax = 0;
+      } else if (this.maxChroma[hMax][v] === undefined) {
+        console.log(`maxChroma[${hMax}][${v}] doesn't exist`);
+        cMax = 0;
+      } else {
+        cMax = this.maxChroma[hMax][v];
+      }
+
+      minVertices.push(this.HVC_to_XYZ(hMin, v, cMin));
+      maxVertices.push(this.HVC_to_XYZ(hMax, v, cMax));
+    }
+    // console.log("min: ", minVertices);
+    // console.log("max: ", maxVertices);
+
+    // todo: interpolated end hue
+    // todo: add dark value grayscale point
 
     // convert vertex lists to geometry
     return {
       minPlane: createPolygonGeometry(minVertices),
-      maxPlane: createPolygonGeometry(maxVertices, true)
-    }
+      maxPlane: createPolygonGeometry(maxVertices, true),
+    };
   }
-  
+
   // 2 value planes (horizontal)
   valuePlanes() {
     const minVertices = [];
@@ -394,12 +471,12 @@ class Slicer {
       // minVertices.push()
     }
 
-    // todo 
+    // todo
 
-    return {
-      minPlane: createPolygonGeometry(minVertices),
-      maxPlane: createPolygonGeometry(maxVertices, true)
-    }
+    // return {
+    //   minPlane: createPolygonGeometry(minVertices),
+    //   maxPlane: createPolygonGeometry(maxVertices, true)
+    // }
   }
 
   chromaCylinders() {
@@ -412,81 +489,86 @@ class Slicer {
 
     return {
       minCyl: createCylinderGeometry(minTopVertices, minBotVertices, false),
-      maxCyl: createCylinderGeometry(maxTopVertices, maxBotVertices)
-    }
+      maxCyl: createCylinderGeometry(maxTopVertices, maxBotVertices),
+    };
   }
 
   // cylindrical to cartesian coordinate helpers
   HVC_to_XYZ(h, v, c) {
-    const hueRadians = h * Math.PI / 180.0;
+    const hueRadians = (h * Math.PI) / 180.0;
     const x = c * Math.cos(hueRadians);
-    const y = v;
+    const y = Y_SCALE * v;
     const z = c * Math.sin(hueRadians);
-    
+
     return { x, y, z };
   }
 
   XYZ_to_HVC(x, y, z) {
-    const v = y;
+    const v = y / Y_SCALE;
     const c = Math.sqrt(x * x + z * z);
-    let h = Math.atan2(z, x) * 180.0 / Math.PI;
-    if (h < 0) { 
-        h += 360;
+    let h = (Math.atan2(z, x) * 180.0) / Math.PI;
+    if (h < 0) {
+      h += 360;
     }
-    
+
     return { h, v, c };
   }
 
   // todo: might need to account for triangles
-  lerpMaxChroma(targetHue, targetValue) {
-    
-  }
-
-  
+  // (the line goes from upper left to lower right)
+  lerpMaxChroma(targetHue, targetValue) {}
 }
 
 /**
- * creates a planar polygon from vertices arranged in a loop 
+ * creates a planar polygon from vertices arranged in a loop
  * using triangle fan topology (all triangles share the first vertex as a common point)
  * WINDING ORDER: DEFAULTS to ccw (when viewed from the direction of the normal)
  */
 function createPolygonGeometry(vertices, reverseWinding = false) {
-    const vertexCount = vertices.length;
-    
-    if (vertexCount < 3) {
-        throw new Error('Need at least 3 vertices to create a loop');
-    }
+  console.log("vertices in create polygon geometry: ", vertices);
+  const vertexCount = vertices.length;
 
-    // flatten vertices array into positions array (expected by THREE)
-    const positions = [];
-    vertices.forEach(vertex => {
-        positions.push(vertex.x, vertex.y, vertex.z);
-    });
-    
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    
-    // triangle fan indices (all triangles share vertex 0)
-    const indices = [];
-    for (let i = 1; i < vertexCount - 1; i++) {
-        if (reverseWinding) {
-            // CW winding
-            indices.push(0, i + 1, i);
-        } else {
-            // CCW winding
-            indices.push(0, i, i + 1);
-        }
+  if (vertexCount < 3) {
+    throw new Error("Need at least 3 vertices to create a loop");
+  }
+
+  // flatten vertices array into positions array (expected by THREE)
+  const positions = [];
+  vertices.forEach((vertex) => {
+    positions.push(vertex.x, vertex.y, vertex.z);
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3)
+  );
+
+  // triangle fan indices (all triangles share vertex 0)
+  const indices = [];
+  for (let i = 1; i < vertexCount - 1; i++) {
+    if (reverseWinding) {
+      // CW winding
+      indices.push(0, i + 1, i);
+    } else {
+      // CCW winding
+      indices.push(0, i, i + 1);
     }
-    console.log(vertices);
-    console.log(indices);
-    
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
-    
-    return geometry;
+  }
+  // console.log(vertices);
+  // console.log(indices);
+
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  return geometry;
 }
 
-function createCylinderGeometry(topPositions, botPositions, normalOutward = true) {
+function createCylinderGeometry(
+  topPositions,
+  botPositions,
+  normalOutward = true
+) {
   // todo
 }
 
@@ -687,9 +769,13 @@ class TwoHandleSlider {
   }
 
   init() {
-    this.handle1.addEventListener("mousedown", e => this.startDrag(e, "handle1"));
-    this.handle2.addEventListener("mousedown", e => this.startDrag(e, "handle2"));
-    document.addEventListener("mousemove", e => this.drag(e));
+    this.handle1.addEventListener("mousedown", (e) =>
+      this.startDrag(e, "handle1")
+    );
+    this.handle2.addEventListener("mousedown", (e) =>
+      this.startDrag(e, "handle2")
+    );
+    document.addEventListener("mousemove", (e) => this.drag(e));
     document.addEventListener("mouseup", () => this.endDrag());
   }
 
@@ -720,7 +806,9 @@ class TwoHandleSlider {
 
   endDrag() {
     this.isDragging = false;
-    this.container.querySelectorAll(".handle").forEach(h => h.classList.remove("active"));
+    this.container
+      .querySelectorAll(".handle")
+      .forEach((h) => h.classList.remove("active"));
   }
 
   updateDisplay() {
@@ -765,35 +853,35 @@ window.addEventListener("resize", resize);
 async function loadCustomPLY(url) {
   const response = await fetch(url);
   const text = await response.text();
-  
-  const lines = text.split('\n');
+
+  const lines = text.split("\n");
   let headerEndIndex = -1;
   let vertexCount = 0;
   let faceCount = 0;
   let vertexProperties = [];
-  
+
   // Parse header
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (line === 'end_header') {
+    if (line === "end_header") {
       headerEndIndex = i;
       break;
     }
-    if (line.startsWith('element vertex')) {
-      vertexCount = parseInt(line.split(' ')[2]);
+    if (line.startsWith("element vertex")) {
+      vertexCount = parseInt(line.split(" ")[2]);
     }
-    if (line.startsWith('element face')) {
-      faceCount = parseInt(line.split(' ')[2]);
+    if (line.startsWith("element face")) {
+      faceCount = parseInt(line.split(" ")[2]);
     }
-    if (line.startsWith('property') && !line.includes('list')) {
-      const parts = line.split(' ');
+    if (line.startsWith("property") && !line.includes("list")) {
+      const parts = line.split(" ");
       vertexProperties.push({
         type: parts[1],
-        name: parts[2]
+        name: parts[2],
       });
     }
   }
-  
+
   // Parse vertex data
   const positions = [];
   const colors = [];
@@ -801,70 +889,96 @@ async function loadCustomPLY(url) {
   const values = [];
   const chromas = [];
   const isClipped = [];
-  
+
   for (let i = headerEndIndex + 1; i < headerEndIndex + 1 + vertexCount; i++) {
     if (!lines[i]) continue; // skips empty lines etc
     const line = lines[i].trim();
     if (!line) continue;
-    
-    const values_line = line.split(' ');
+
+    const values_line = line.split(" ");
 
     // PLY structure: x, y, z, r, g, b, hue, value, chroma, is_clipped
     positions.push(
-      parseFloat(values_line[0]), 
-      parseFloat(values_line[1]), 
+      parseFloat(values_line[0]),
+      parseFloat(values_line[1]),
       parseFloat(values_line[2])
     );
-    
+
     colors.push(
-      parseInt(values_line[3]) / 255, 
-      parseInt(values_line[4]) / 255, 
+      parseInt(values_line[3]) / 255,
+      parseInt(values_line[4]) / 255,
       parseInt(values_line[5]) / 255
     );
-    
+
     hues.push(parseFloat(values_line[6]));
     values.push(parseFloat(values_line[7]));
     chromas.push(parseFloat(values_line[8]));
     isClipped.push(parseInt(values_line[9]));
   }
-  
+
   // Parse face data
   const indices = [];
   const faceStartIndex = headerEndIndex + 1 + vertexCount;
-  
-  for (let i = faceStartIndex; i < faceStartIndex + faceCount && i < lines.length; i++) {
+
+  for (
+    let i = faceStartIndex;
+    i < faceStartIndex + faceCount && i < lines.length;
+    i++
+  ) {
     const line = lines[i].trim();
     if (!line || !lines[i]) continue;
-    
-    const face_data = line.split(' ').map(v => parseInt(v));
+
+    const face_data = line.split(" ").map((v) => parseInt(v));
     const vertexCount = face_data[0];
-    
+
     if (vertexCount === 3) {
       // Triangle
       indices.push(face_data[1], face_data[2], face_data[3]);
     } else if (vertexCount === 4) {
       // Quad - split into two triangles
       indices.push(
-        face_data[1], face_data[2], face_data[3],
-        face_data[1], face_data[3], face_data[4]
+        face_data[1],
+        face_data[2],
+        face_data[3],
+        face_data[1],
+        face_data[3],
+        face_data[4]
       );
     }
   }
-  
+
   // Create geometry
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-  geometry.setAttribute('hue', new THREE.BufferAttribute(new Float32Array(hues), 1));
-  geometry.setAttribute('value', new THREE.BufferAttribute(new Float32Array(values), 1));
-  geometry.setAttribute('chroma', new THREE.BufferAttribute(new Float32Array(chromas), 1));
-  geometry.setAttribute('isClipped', new THREE.BufferAttribute(new Float32Array(isClipped), 1));
-  
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(new Float32Array(positions), 3)
+  );
+  geometry.setAttribute(
+    "color",
+    new THREE.BufferAttribute(new Float32Array(colors), 3)
+  );
+  geometry.setAttribute(
+    "hue",
+    new THREE.BufferAttribute(new Float32Array(hues), 1)
+  );
+  geometry.setAttribute(
+    "value",
+    new THREE.BufferAttribute(new Float32Array(values), 1)
+  );
+  geometry.setAttribute(
+    "chroma",
+    new THREE.BufferAttribute(new Float32Array(chromas), 1)
+  );
+  geometry.setAttribute(
+    "isClipped",
+    new THREE.BufferAttribute(new Float32Array(isClipped), 1)
+  );
+
   if (indices.length > 0) {
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
   }
-  
+
   return geometry;
 }
 
@@ -876,8 +990,8 @@ function loadMeshes() {
       name: "shell",
       type: "mesh",
       materials: {
-        mesh: async() => await slicer.getMaterial("mesh")
-      }
+        mesh: async () => await slicer.getMaterial("mesh"),
+      },
     },
     // interpolated point cloud
     // tbh this should never get shown
@@ -887,7 +1001,7 @@ function loadMeshes() {
       type: "points",
       materials: {
         points: async () => await slicer.getMaterial("points"),
-      }
+      },
     },
     // raw real.dat data points
     {
@@ -896,7 +1010,7 @@ function loadMeshes() {
       type: "points",
       materials: {
         points: async () => await slicer.getMaterial("points"),
-      }
+      },
     },
   ];
 
@@ -914,10 +1028,7 @@ function loadMeshes() {
       // Create Three.js object
       let threejsObject;
       if (config.type === "mesh") {
-        threejsObject = new THREE.Mesh(
-          geometry,
-          materials.mesh   
-        );
+        threejsObject = new THREE.Mesh(geometry, materials.mesh);
       } else if (config.type === "points") {
         threejsObject = new THREE.Points(geometry, materials.points);
       }
@@ -994,7 +1105,7 @@ function animate() {
   }
 
   // clear color, depth, & stencil buffers
-  renderer.clear(true, true, true); 
+  renderer.clear(true, true, true);
   renderer.render(scene, camera);
 
   controls.update();
@@ -1005,10 +1116,10 @@ async function load3DTexture(filename, size) {
   if (!response.ok) {
     throw new Error(`Failed to load texture: ${response.statusText}`);
   }
-  
+
   const arrayBuffer = await response.arrayBuffer();
   const data = new Uint8Array(arrayBuffer);
-  
+
   const texture = new THREE.Data3DTexture(data, size, size, size);
   texture.format = THREE.RGBAFormat;
   texture.type = THREE.UnsignedByteType;
@@ -1018,7 +1129,7 @@ async function load3DTexture(filename, size) {
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.wrapR = THREE.ClampToEdgeWrapping;
   texture.needsUpdate = true;
-  
+
   return texture;
 }
 
