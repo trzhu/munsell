@@ -424,6 +424,10 @@ def write_json(dictionary):
     # convert from default dict to regular dict
     d = dict(dictionary)
 
+<<<<<<< HEAD
+=======
+    # Option 1: Nested object structure (easiest to read in JS)
+>>>>>>> 032c8931d0c92dad82fcc64a79f95159fac8341c
     nested_dict = {}
     for (hue, value), chroma in d.items():
         if hue not in nested_dict:
