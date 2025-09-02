@@ -278,7 +278,7 @@ class Slicer {
       vertexShader = shaders.sliceVertex;
       fragmentShader = shaders.sliceFragment;
       // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way
-      side = THREE.DoubleSide;
+      side = THREE.FrontSide;
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -295,7 +295,7 @@ class Slicer {
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
       // debug
-      material.wireframe = true;
+      // material.wireframe = true;
     }
     
     return material;
@@ -380,15 +380,15 @@ class Slicer {
     materialPromise.then((material) => {
 
       const huePlanes = this.huePlanes();
-      // not ready for these yet
       // const valuePlanes = this.valuePlanes();
       // const chromaCyls = this.chromaCylinders();
 
       this.meshRefs.hueMinPlane = new THREE.Mesh(huePlanes.minPlane, material);
       this.meshRefs.hueMaxPlane = new THREE.Mesh(huePlanes.maxPlane, material);
 
-      // this.meshRefs.valueMinPlane
-      // this.meshRefs.valueMaxPlane etc...
+      // this.meshRefs.valueMinPlane = new THREE.Mesh(valuePlanes.minPlane, material);
+      // this.meshRefs.valueMaxPlane = new THREE.Mesh(valuePlanes.maxPlane, material);
+      
 
       Object.values(this.meshRefs).forEach((mesh) => {
         if (mesh) {
@@ -464,8 +464,8 @@ class Slicer {
 
     // convert vertex lists to geometry
     return {
-      minPlane: createHuePlane(minInnerVertices, minOuterVertices),
-      maxPlane: createHuePlane(maxInnerVertices, maxOuterVertices, true),
+      minPlane: createGeometry(minInnerVertices, minOuterVertices),
+      maxPlane: createGeometry(maxInnerVertices, maxOuterVertices, true),
     };
   }
 
@@ -481,10 +481,10 @@ class Slicer {
 
     // todo
 
-    // return {
-    //   minPlane: createPolygonGeometry(minVertices),
-    //   maxPlane: createPolygonGeometry(maxVertices, true)
-    // }
+    return {
+      minPlane: createGeometry(minVertices),
+      maxPlane: createGeometry(maxVertices, true)
+    }
   }
 
   chromaCylinders() {
@@ -496,8 +496,8 @@ class Slicer {
     // todo
 
     return {
-      minCyl: createCylinderGeometry(minTopVertices, minBotVertices, false),
-      maxCyl: createCylinderGeometry(maxTopVertices, maxBotVertices),
+      minCyl: createGeometry(minTopVertices, minBotVertices, false),
+      maxCyl: createGeometry(maxTopVertices, maxBotVertices),
     };
   }
 
@@ -583,7 +583,6 @@ class Slicer {
     const c1 = c01 * (1 - hueWeight) + c11 * hueWeight;
     const result = c0 * (1 - valueWeight) + c1 * valueWeight;
     
-
     // console.log("hue, value, result: ", hue, value, result);
 
     return result;
@@ -595,10 +594,14 @@ function clamp(num, min, max) {
   return Math.min(Math.max(num, min), max)
 }
 
-// creates planar polygon for a hue plane
-// taking edge of inner vertices and outer vertices, and connecting them with horizontal strips 
-function createHuePlane(innerVertices, outerVertices, reverseWinding = false) {
-  if (outerVertices.length < 3 || innerVertices.length < 3) {
+// creates geometry by connecting the 2 edges with quadrilateral strips
+// e.g. for hue plane, input is an edge of inner vertices and outer vertices, connect them with horizontal rectangles
+// (when edges converge to 1 points at top and bottom, just make a triangle degenerate)
+// for value plane, input is inner ring and outer ring, connect them with trapezoids
+// (if whole plane is included just means half of them are degenerate)
+// for chroma cylinders, connect upper and lower rings with vertical strips
+function createGeometry(edge1, edge2, reverseWinding = false) {
+  if (edge1.length < 3 || edge2.length < 3) {
     throw new Error("Need at least 3 vertices in each strip");
   }
   
@@ -606,36 +609,36 @@ function createHuePlane(innerVertices, outerVertices, reverseWinding = false) {
   const indices = [];
   
   // add all vertices to positions array, outer then inner strip
-  outerVertices.forEach(vertex => {
+  edge1.forEach(vertex => {
     positions.push(vertex.x, vertex.y, vertex.z || 0);
   });
-  innerVertices.forEach(vertex => {
+  edge2.forEach(vertex => {
     positions.push(vertex.x, vertex.y, vertex.z || 0);
   });
   
-  const outerCount = outerVertices.length;
-  const innerCount = innerVertices.length;
-  const outerOffset = 0;
-  const innerOffset = outerCount;
+  const edge1Count = edge1.length;
+  const edge2Count = edge2.length;
+  const edge1offset = 0;
+  const edge2offset = edge1Count;
   
   // create quads between corresponding segments of outer and inner strips
-  const segmentCount = Math.min(outerCount, innerCount);
+  const segmentCount = Math.min(edge1Count, edge2Count);
   
   for (let i = 0; i < segmentCount - 1; i++) {
     
     // quad vertices
-    const outerLower = outerOffset + i;
-    const outerUpper = outerOffset + i + 1;
-    const innerLower = innerOffset + i;
-    const innerUpper = innerOffset + i + 1;
+    const v00 = edge1offset + i;
+    const v01 = edge1offset + i + 1;
+    const v10 = edge2offset + i;
+    const v11 = edge2offset + i + 1;
     
-    // Create two triangles for this quad
+    // create two triangles for this quad
     if (reverseWinding) {
-      indices.push(outerLower, innerLower, outerUpper);
-      indices.push(outerUpper, innerLower, innerUpper);
+      indices.push(v00, v10, v01);
+      indices.push(v01, v10, v11);
     } else {
-      indices.push(outerLower, outerUpper, innerLower);
-      indices.push(outerUpper, innerUpper, innerLower);
+      indices.push(v00, v01, v10);
+      indices.push(v01, v11, v10);
     }
   }
   
