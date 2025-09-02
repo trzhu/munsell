@@ -28,8 +28,8 @@ const sceneConfigs = {
   },
   debug: {
     name: "Debug",
-    // visible: ["debug"],
-    visible: ["shell", "cutSurfaces"],
+    visible: ["cutSurfaces"],
+    // visible: ["shell", "cutSurfaces"],
     // visible: ["pointcloud_interpolated"],
     hidden: ["shell", "pointcloud_original"],
   },
@@ -419,25 +419,21 @@ class Slicer {
   // 2 hue planes (pie slice)
   // max value, min value are always vertices.
   huePlanes() {
-
     // makes it easier to read
     // minC, maxC, minV, maxV apply to both hue min and hue max planes
     const minC = this.uniforms.chromaMin.value;
     const maxC = this.uniforms.chromaMax.value;
     const minV = this.uniforms.valueMin.value;
     const maxV = this.uniforms.valueMax.value;
+    // convert hue to degrees
+    const hMin = this.uniforms.hueMin.value * 180 / Math.PI
+    const hMax = this.uniforms.hueMax.value * 180 / Math.PI
 
-    // TEMP: ROUND HUE before lerp is ready
-    const hMin =
-      9 * Math.round((this.uniforms.hueMin.value * 180) / Math.PI / 9);
-    const hMax =
-      9 * Math.round((this.uniforms.hueMax.value * 180) / Math.PI / 9);
+    console.log("hMin:", hMin, "hMax:", hMax);
+    console.log("vMin:", minV, "vMax:", maxV);
 
     const minVertices = [];
     const maxVertices = [];
-
-    // console.log("hMin:", hMin, "hMax:", hMax);
-    // console.log("vMin:", minV, "vMax:", maxV);
 
     // min value min chroma point
     // todo: actually this needs to depend on irregular edge start
@@ -447,21 +443,24 @@ class Slicer {
     }
 
     // irregular edge start hue (may be interpolated)
-    minVertices.push(this.HVC_to_XYZ(hMin, minV, this.getMaxChroma(hMin, minV)));
-    maxVertices.push(this.HVC_to_XYZ(hMax, minV, this.getMaxChroma(hMax, minV)));
+    minVertices.push(this.HVC_to_XYZ(hMin, minV, clamp(this.getMaxChroma(hMin, minV), minC, maxC)));
+    maxVertices.push(this.HVC_to_XYZ(hMax, minV, clamp(this.getMaxChroma(hMax, minV), minC, maxC)));
 
-    // for in-between vertices, used grid points directly
+    console.log("get max chroma hMin, minV ", this.getMaxChroma(hMin, minV));
+    console.log("get max chroma hMax, minV ", this.getMaxChroma(hMax, minV));
+
+    // for in-between vertices, use grid points directly
     for (let v = Math.ceil(minV); v < maxV; v += 1) {
-      const c_hMin = this.maxChroma[hMin]?.[v] || 0;
-      const c_hMax = this.maxChroma[hMax]?.[v] || 0;
+      const c_hMin = this.getMaxChroma(hMin, v);
+      const c_hMax = this.getMaxChroma(hMax, v);
       // clamp to be in between minC and maxC
       minVertices.push(this.HVC_to_XYZ(hMin, v, clamp(c_hMin, minC, maxC)));
       maxVertices.push(this.HVC_to_XYZ(hMax, v, clamp(c_hMax, minC, maxC)));
     }
 
     // irregular edge end hue
-    minVertices.push(this.HVC_to_XYZ(hMin, maxV, this.getMaxChroma(hMin, maxV)));
-    maxVertices.push(this.HVC_to_XYZ(hMax, maxV, this.getMaxChroma(hMax, maxV)));
+    minVertices.push(this.HVC_to_XYZ(hMin, maxV, clamp(this.getMaxChroma(hMin, maxV), minC, maxC)));
+    maxVertices.push(this.HVC_to_XYZ(hMax, maxV, clamp(this.getMaxChroma(hMax, maxV), minC, maxC)));
     
     // max value min chroma point
     // todo: actually this neesd to depend on irregular edge end
@@ -535,16 +534,74 @@ class Slicer {
   getMaxChroma(hue, value) {
     // edge cases white and black
     if (value <= 1 || value >= 10) {
-        return 0;
+      console.log("white or black, returning 0");
+      return 0;
     }
 
     // if already on the grid
     if (this.maxChroma[hue] && this.maxChroma[hue][value]) {
+      console.log("aligned to grid, returning canonical value");
       return this.maxChroma[hue][value];
     }
 
-    //oopsie
-    return 0;
+    console.log("not aligned to grid");
+
+    const hStep = 9;
+
+    let lowHue = Math.floor(hue / hStep) * hStep;
+    let highHue = lowHue + hStep;
+
+    // Handle hue wraparound at 0/360 boundary
+    if (lowHue === 0) {
+        lowHue = 360;
+        highHue = 9;
+    } else if (highHue > 360) {
+        highHue = 9; // Wrap around to 9
+    } else if (lowHue === 360) {
+        lowHue = 360;
+        highHue = 9;
+    }
+
+    // Find surrounding value levels (integers)
+    const lowValue = Math.floor(value);
+    const highValue = Math.min(10, lowValue + 1);
+
+    // Get the 4 corner values for bilinear interpolation
+    const c00 = this.maxChroma[lowHue ][lowValue ] || 0; // bottom-left
+    const c10 = this.maxChroma[highHue][lowValue ] || 0; // bottom-right
+    const c01 = this.maxChroma[lowHue ][highValue] || 0; // top-left
+    const c11 = this.maxChroma[highHue][highValue] || 0; // top-right
+
+    console.log("lowHue, highHue = ", lowHue, ", ", highHue);
+    console.log("lowValue, highValue = ", lowValue, ", ", highValue);
+    console.log("corner values: ", c00, c10, c01, c11);
+    
+    // Calculate interpolation weights
+    let hueWeight;
+    if (lowHue === 360 && highHue === 9) {
+        // Special case for wraparound
+        if (hue <= 180) {
+            // targetHue is closer to 9 than 360
+            hueWeight = (hue + 360 - 360) / (9 + 360 - 360);
+        } else {
+            // targetHue is closer to 360
+            hueWeight = (hue - 360) / (9 + 360 - 360);
+        }
+    } else {
+        hueWeight = (hue - lowHue) / (highHue - lowHue);
+    }
+    
+    const valueWeight = (value - lowValue) / (highValue - lowValue);
+    
+    // Bilinear interpolation
+    const c0 = c00 * (1 - hueWeight) + c10 * hueWeight;  // Interpolate along bottom edge
+    const c1 = c01 * (1 - hueWeight) + c11 * hueWeight;  // Interpolate along top edge
+    const result = c0 * (1 - valueWeight) + c1 * valueWeight; // Interpolate vertically
+    
+
+    console.log("hue, value, result: ", hue, value, result);
+
+    return result;
     
   }
 
@@ -559,7 +616,7 @@ function clamp(num, min, max) {
  * using triangle fan topology (all triangles share the first vertex as a common point)
  * WINDING ORDER: DEFAULTS to ccw (when viewed from the direction of the normal)
  * TODO: don't use triangle fan topology, it doesn't handle concavities well
- * maybe extend horizontal rectangles 
+ * maybe extend horizontal rectangles instead
  */
 function createPolygonGeometry(vertices, reverseWinding = false) {
   console.log("vertices in create polygon geometry: ", vertices);
