@@ -10,7 +10,6 @@ uniform float chromaMax;
 uniform float valueMin;
 uniform float valueMax;
 uniform float useLighting;
-uniform float showOutsideRGB;
 
 void main() {
     bool positionInRange;
