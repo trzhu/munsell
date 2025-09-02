@@ -432,47 +432,41 @@ class Slicer {
     console.log("hMin:", hMin, "hMax:", hMax);
     console.log("vMin:", minV, "vMax:", maxV);
 
-    const minVertices = [];
-    const maxVertices = [];
+    // inner and outer edge of min and max hue planes
+    const minInnerVertices = [];
+    const minOuterVertices = [];
+    const maxInnerVertices = [];
+    const maxOuterVertices = [];
 
-    // min value min chroma point
-    // todo: actually this needs to depend on irregular edge start
-    if (minV > 0) {
-      minVertices.push(this.HVC_to_XYZ(hMin, minV, minC));
-      maxVertices.push(this.HVC_to_XYZ(hMax, minV, minC));
-    }
+    // from bottom to top, starting from min value point
+    minInnerVertices.push(this.HVC_to_XYZ(hMin, minV, minC));
+    maxInnerVertices.push(this.HVC_to_XYZ(hMax, minV, minC));
 
-    // irregular edge start hue (may be interpolated)
-    minVertices.push(this.HVC_to_XYZ(hMin, minV, clamp(this.getMaxChroma(hMin, minV), minC, maxC)));
-    maxVertices.push(this.HVC_to_XYZ(hMax, minV, clamp(this.getMaxChroma(hMax, minV), minC, maxC)));
-
-    console.log("get max chroma hMin, minV ", this.getMaxChroma(hMin, minV));
-    console.log("get max chroma hMax, minV ", this.getMaxChroma(hMax, minV));
-
+    minOuterVertices.push(this.HVC_to_XYZ(hMin, minV, clamp(this.getMaxChroma(hMin, minV), minC, maxC)));
+    maxOuterVertices.push(this.HVC_to_XYZ(hMax, minV, clamp(this.getMaxChroma(hMax, minV), minC, maxC)));
+    
     // for in-between vertices, use grid points directly
-    for (let v = Math.ceil(minV); v < maxV; v += 1) {
+    for (let v = Math.floor(minV + 1); v < maxV; v += 1) {
+      minInnerVertices.push(this.HVC_to_XYZ(hMin, v, minC));
+      maxInnerVertices.push(this.HVC_to_XYZ(hMax, v, minC));
+
       const c_hMin = this.getMaxChroma(hMin, v);
       const c_hMax = this.getMaxChroma(hMax, v);
       // clamp to be in between minC and maxC
-      minVertices.push(this.HVC_to_XYZ(hMin, v, clamp(c_hMin, minC, maxC)));
-      maxVertices.push(this.HVC_to_XYZ(hMax, v, clamp(c_hMax, minC, maxC)));
+      minOuterVertices.push(this.HVC_to_XYZ(hMin, v, clamp(c_hMin, minC, maxC)));
+      maxOuterVertices.push(this.HVC_to_XYZ(hMax, v, clamp(c_hMax, minC, maxC)));
     }
 
-    // irregular edge end hue
-    minVertices.push(this.HVC_to_XYZ(hMin, maxV, clamp(this.getMaxChroma(hMin, maxV), minC, maxC)));
-    maxVertices.push(this.HVC_to_XYZ(hMax, maxV, clamp(this.getMaxChroma(hMax, maxV), minC, maxC)));
-    
-    // max value min chroma point
-    // todo: actually this neesd to depend on irregular edge end
-    if (maxV < 10) {
-      minVertices.push(this.HVC_to_XYZ(hMin, maxV, minC));
-      maxVertices.push(this.HVC_to_XYZ(hMax, maxV, minC));
-    }
+    minInnerVertices.push(this.HVC_to_XYZ(hMin, maxV, minC));
+    maxInnerVertices.push(this.HVC_to_XYZ(hMax, maxV, minC));
+
+    minOuterVertices.push(this.HVC_to_XYZ(hMin, maxV, clamp(this.getMaxChroma(hMin, maxV), minC, maxC)));
+    maxOuterVertices.push(this.HVC_to_XYZ(hMax, maxV, clamp(this.getMaxChroma(hMax, maxV), minC, maxC)));
 
     // convert vertex lists to geometry
     return {
-      minPlane: createPolygonGeometry(minVertices),
-      maxPlane: createPolygonGeometry(maxVertices, true),
+      minPlane: createHuePlane(minInnerVertices, minOuterVertices),
+      maxPlane: createHuePlane(maxInnerVertices, maxOuterVertices, true),
     };
   }
 
@@ -533,7 +527,7 @@ class Slicer {
   // (the line goes from upper left to lower right)
   getMaxChroma(hue, value) {
     // edge cases white and black
-    if (value <= 1 || value >= 10) {
+    if (value <= 0 || value >= 10) {
       console.log("white or black, returning 0");
       return 0;
     }
@@ -611,50 +605,69 @@ function clamp(num, min, max) {
   return Math.min(Math.max(num, min), max)
 }
 
-/**
- * creates a planar polygon from vertices arranged in a loop
- * using triangle fan topology (all triangles share the first vertex as a common point)
- * WINDING ORDER: DEFAULTS to ccw (when viewed from the direction of the normal)
- * TODO: don't use triangle fan topology, it doesn't handle concavities well
- * maybe extend horizontal rectangles instead
- */
-function createPolygonGeometry(vertices, reverseWinding = false) {
-  console.log("vertices in create polygon geometry: ", vertices);
-  const vertexCount = vertices.length;
-
-  if (vertexCount < 3) {
-    throw new Error("Need at least 3 vertices to create a loop");
+// creates planar polygon for a hue plane
+// taking edge of inner vertices and outer vertices, and connecting them with horizontal strips 
+function createHuePlane(innerVertices, outerVertices, reverseWinding = false) {
+  console.log("outer vertices: ", outerVertices);
+  console.log("inner vertices: ", innerVertices);
+  
+  if (outerVertices.length < 3 || innerVertices.length < 3) {
+    throw new Error("Need at least 3 vertices in each strip");
   }
-
-  // flatten vertices array into positions array (expected by THREE)
+  
   const positions = [];
-  vertices.forEach((vertex) => {
-    positions.push(vertex.x, vertex.y, vertex.z);
+  const indices = [];
+  let vertexIndex = 0;
+  
+  // Add all vertices to positions array
+  // First add outer strip
+  outerVertices.forEach(vertex => {
+    positions.push(vertex.x, vertex.y, vertex.z || 0);
   });
-
+  
+  // Then add inner strip
+  innerVertices.forEach(vertex => {
+    positions.push(vertex.x, vertex.y, vertex.z || 0);
+  });
+  
+  const outerCount = outerVertices.length;
+  const innerCount = innerVertices.length;
+  const outerOffset = 0;
+  const innerOffset = outerCount;
+  
+  // Create quads between corresponding segments of outer and inner strips
+  const segmentCount = Math.min(outerCount, innerCount);
+  
+  for (let i = 0; i < segmentCount; i++) {
+    const nextI = (i + 1) % segmentCount;
+    
+    // Quad vertices (going around the quad)
+    const outerCurrent = outerOffset + i;
+    const outerNext = outerOffset + nextI;
+    const innerCurrent = innerOffset + i;
+    const innerNext = innerOffset + nextI;
+    
+    // Create two triangles for this quad
+    if (reverseWinding) {
+      // First triangle: outer-current, inner-current, outer-next
+      indices.push(outerCurrent, innerCurrent, outerNext);
+      // Second triangle: outer-next, inner-current, inner-next
+      indices.push(outerNext, innerCurrent, innerNext);
+    } else {
+      // First triangle: outer-current, outer-next, inner-current
+      indices.push(outerCurrent, outerNext, innerCurrent);
+      // Second triangle: outer-next, inner-next, inner-current
+      indices.push(outerNext, innerNext, innerCurrent);
+    }
+  }
+  
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
     new THREE.Float32BufferAttribute(positions, 3)
   );
-
-  // triangle fan indices (all triangles share vertex 0)
-  const indices = [];
-  for (let i = 1; i < vertexCount - 1; i++) {
-    if (reverseWinding) {
-      // CW winding
-      indices.push(0, i + 1, i);
-    } else {
-      // CCW winding
-      indices.push(0, i, i + 1);
-    }
-  }
-  // console.log(vertices);
-  // console.log(indices);
-
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-
   return geometry;
 }
 
