@@ -295,7 +295,7 @@ class Slicer {
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
       // debug
-      // material.wireframe = true;
+      material.wireframe = true;
     }
     
     return material;
@@ -344,7 +344,7 @@ class Slicer {
   // updates cut surface positions when min/max h,v,c change
   updateCutSurfaces() {
     if (!this.maxChroma) {
-      console.log("maxChroma still loading");
+      // console.log("maxChroma still loading");
       return;
     }
 
@@ -380,14 +380,14 @@ class Slicer {
     materialPromise.then((material) => {
 
       const huePlanes = this.huePlanes();
-      // const valuePlanes = this.valuePlanes();
+      const valuePlanes = this.valuePlanes();
       // const chromaCyls = this.chromaCylinders();
 
       this.meshRefs.hueMinPlane = new THREE.Mesh(huePlanes.minPlane, material);
       this.meshRefs.hueMaxPlane = new THREE.Mesh(huePlanes.maxPlane, material);
 
-      // this.meshRefs.valueMinPlane = new THREE.Mesh(valuePlanes.minPlane, material);
-      // this.meshRefs.valueMaxPlane = new THREE.Mesh(valuePlanes.maxPlane, material);
+      this.meshRefs.valueMinPlane = new THREE.Mesh(valuePlanes.minPlane, material);
+      this.meshRefs.valueMaxPlane = new THREE.Mesh(valuePlanes.maxPlane, material);
       
 
       Object.values(this.meshRefs).forEach((mesh) => {
@@ -471,19 +471,54 @@ class Slicer {
 
   // 2 value planes (horizontal)
   valuePlanes() {
-    const minVertices = [];
-    const maxVertices = [];
+    // minC, maxC, minH, maxH apply to both value min and value max planes
+    const minC = this.uniforms.chromaMin.value;
+    const maxC = this.uniforms.chromaMax.value;
+    const minH = this.uniforms.hueMin.value * 180 / Math.PI
+    const maxH = this.uniforms.hueMax.value * 180 / Math.PI
 
-    // if hue start != hue end, the center vertex must be included
-    if (this.uniforms.hueMin.value != this.uniforms.hueMax.value) {
-      // minVertices.push()
+    const vMin = this.uniforms.valueMin.value;
+    const vMax = this.uniforms.valueMax.value;
+
+
+    const minInnerVertices = [];
+    const minOuterVertices = [];
+    const maxInnerVertices = [];
+    const maxOuterVertices = [];
+
+    // CCW from minH
+    minInnerVertices.push(this.HVC_to_XYZ(minH, vMin, minC));
+    maxInnerVertices.push(this.HVC_to_XYZ(minH, vMax, minC));
+    minOuterVertices.push(this.HVC_to_XYZ(minH, vMin, clamp(this.getMaxChroma(minH, vMin), minC, maxC)));
+    maxOuterVertices.push(this.HVC_to_XYZ(minH, vMax, clamp(this.getMaxChroma(minH, vMax), minC, maxC)));
+
+    // handle hue wraparound
+    const hueSpan = maxH > minH ? maxH - minH : (360 - minH) + maxH;
+    const numSteps = Math.floor(hueSpan / 9);
+    const startH = Math.ceil(minH / 9) * 9;
+
+    // for every h from minH to maxH in increments of 9, (grid points only)
+    for (let i = 1; i < numSteps; i++) {
+      const h = (startH + i * 9) % 360;
+      
+      minInnerVertices.push(this.HVC_to_XYZ(h, vMin, minC));
+      maxInnerVertices.push(this.HVC_to_XYZ(h, vMax, minC));
+
+      const c_hMin = this.getMaxChroma(h, vMin);
+      const c_hMax = this.getMaxChroma(h, vMax);
+      // clamp to be in between minC and maxC
+      minOuterVertices.push(this.HVC_to_XYZ(h, vMin, clamp(c_hMin, minC, maxC)));
+      maxOuterVertices.push(this.HVC_to_XYZ(h, vMax, clamp(c_hMax, minC, maxC)));
     }
 
-    // todo
+    minInnerVertices.push(this.HVC_to_XYZ(maxH, vMin, minC));
+    maxInnerVertices.push(this.HVC_to_XYZ(maxH, vMax, minC));
+    minOuterVertices.push(this.HVC_to_XYZ(maxH, vMin, clamp(this.getMaxChroma(minH, vMin), minC, maxC)));
+    maxOuterVertices.push(this.HVC_to_XYZ(maxH, vMax, clamp(this.getMaxChroma(minH, vMax), minC, maxC)));
 
     return {
-      minPlane: createGeometry(minVertices),
-      maxPlane: createGeometry(maxVertices, true)
+      minPlane: createGeometry(minInnerVertices, minOuterVertices, true),
+      maxPlane: createGeometry(maxInnerVertices, maxOuterVertices)
     }
   }
 
@@ -641,6 +676,11 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
       indices.push(v01, v11, v10);
     }
   }
+
+  console.log("First 3 outer:", edge1.slice(0, 3));
+  console.log("First 3 inner:", edge2.slice(0, 3));
+  console.log("Last 3 outer:" , edge1.slice(-3));
+  console.log("Last 3 inner:" , edge2.slice(-3));
   
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -650,11 +690,6 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
-}
-
-function createCylinderGeometry(topVertices, botVertices, normalOutward = true
-) {
-  // todo
 }
 
 class CircularSlider {
