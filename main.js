@@ -18,7 +18,8 @@ const meshes = {};
 const sceneConfigs = {
   default: {
     name: "Volume",
-    visible: ["shell", "cutSurfaces"],
+    visible: ["shell"],
+    // visible: ["shell", "cutSurfaces"],
     hidden: ["pointcloud_interpolated", "pointcloud_original"],
   },
   pointCloud: {
@@ -273,12 +274,12 @@ class Slicer {
     } else if (type === "mesh") {
       vertexShader = shaders.meshVertex;
       fragmentShader = shaders.meshFragment;
-      side = THREE.FrontSide;
+      side = THREE.DoubleSide;
     } else if (type === "cutSurface") {
       vertexShader = shaders.sliceVertex;
       fragmentShader = shaders.sliceFragment;
       // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way
-      side = THREE.FrontSide;
+      side = THREE.DoubleSide;
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -381,13 +382,16 @@ class Slicer {
 
       const huePlanes = this.huePlanes();
       const valuePlanes = this.valuePlanes();
-      // const chromaCyls = this.chromaCylinders();
+      const chromaCyls = this.chromaCylinders();
 
       this.meshRefs.hueMinPlane = new THREE.Mesh(huePlanes.minPlane, material);
       this.meshRefs.hueMaxPlane = new THREE.Mesh(huePlanes.maxPlane, material);
 
       this.meshRefs.valueMinPlane = new THREE.Mesh(valuePlanes.minPlane, material);
       this.meshRefs.valueMaxPlane = new THREE.Mesh(valuePlanes.maxPlane, material);
+
+      this.meshRefs.chromaMinCyl = new THREE.Mesh(chromaCyls.minCyl, material);
+      this.meshRefs.chromaMaxCyl = new THREE.Mesh(chromaCyls.maxCyl, material);
       
 
       Object.values(this.meshRefs).forEach((mesh) => {
@@ -523,12 +527,79 @@ class Slicer {
   }
 
   chromaCylinders() {
-    const minTopVertices = [];
-    const minBotVertices = [];
-    const maxTopVertices = [];
-    const maxBotVertices = [];
+    // minH, maxH, minV, maxV apply to both chroma min and chroma max cylinders
+    const minH = this.uniforms.hueMin.value * 180 / Math.PI
+    const maxH = this.uniforms.hueMax.value * 180 / Math.PI
+    const minV = this.uniforms.valueMin.value;
+    const maxV = this.uniforms.valueMax.value;
 
-    // todo
+    const cMin = this.uniforms.chromaMin.value;
+    const cMax = this.uniforms.chromaMax.value;
+
+    const minBotVertices = [];
+    const minTopVertices = [];
+    const maxBotVertices = [];
+    const maxTopVertices = [];
+    
+    // todo : this actually needs to be clamped as well, so should just do it in one loop
+    // CCW from minH
+    minBotVertices.push(this.HVC_to_XYZ(minH, minV, cMin));
+    minTopVertices.push(this.HVC_to_XYZ(minH, maxV, cMin));
+    maxBotVertices.push(this.HVC_to_XYZ(minH, minV, cMax));
+    maxTopVertices.push(this.HVC_to_XYZ(minH, maxV, cMax));
+
+    // handle hue wraparound
+    const hueSpan = maxH > minH ? maxH - minH : (360 - minH) + maxH;
+    const numSteps = Math.floor(hueSpan / 9);
+    const startH = Math.ceil(minH / 9) * 9;
+
+    // for every h from minH to maxH in increments of 9, (grid points only)
+    for (let i = 1; i < numSteps; i++) {
+      const h = (startH + i * 9) % 360;
+
+      // minimum and maximum value for this chroma at this hue
+      let vMin_cMin = maxV; // Start with max, find minimum valid V
+      let vMax_cMin = minV; // Start with min, find maximum valid V
+      let vMin_cMax = maxV;
+      let vMax_cMax = minV;
+
+      // for every v from minV to max V on the grid, 
+      // loop over v values to obtain 
+      // which ones are actually in that chroma range
+      // later i should do this with two pointer
+      for (let v = Math.floor(minV + 1); v < maxV; v += 1) {
+        // max chroma at this hue and value combination
+        const maxChroma = this.getMaxChroma(h, v);
+        // if this hue and value are contained within the chroma boundary,
+        // Check if cMin is achievable at this V
+        if (cMin <= maxChroma) {
+          vMin_cMin = Math.min(vMin_cMin, v);
+          vMax_cMin = Math.max(vMax_cMin, v);
+        }
+        
+        // Check if cMax is achievable at this V  
+        if (cMax <= maxChroma) {
+          vMin_cMax = Math.min(vMin_cMax, v);
+          vMax_cMax = Math.max(vMax_cMax, v);
+        }
+      }
+        
+      // clamp v to only the values that actually contain something in that chroma range
+      const clampedMinV_cMin = clamp(minV, vMin_cMin, vMax_cMin);
+      const clampedMaxV_cMin = clamp(maxV, vMin_cMin, vMax_cMin);
+      const clampedMinV_cMax = clamp(minV, vMin_cMax, vMax_cMax);
+      const clampedMaxV_cMax = clamp(maxV, vMin_cMax, vMax_cMax);
+      
+      minBotVertices.push(this.HVC_to_XYZ(h, clampedMinV_cMin, cMin));
+      minTopVertices.push(this.HVC_to_XYZ(h, clampedMaxV_cMin, cMin));
+      maxBotVertices.push(this.HVC_to_XYZ(h, clampedMinV_cMax, cMax));
+      maxTopVertices.push(this.HVC_to_XYZ(h, clampedMaxV_cMax, cMax));
+    }       
+
+    minBotVertices.push(this.HVC_to_XYZ(maxH, minV, cMin));
+    minTopVertices.push(this.HVC_to_XYZ(maxH, maxV, cMin));
+    maxBotVertices.push(this.HVC_to_XYZ(maxH, minV, cMax));
+    maxTopVertices.push(this.HVC_to_XYZ(maxH, maxV, cMax));
 
     return {
       minCyl: createGeometry(minTopVertices, minBotVertices, false),
@@ -636,9 +707,12 @@ function clamp(num, min, max) {
 // (if whole plane is included just means half of them are degenerate)
 // for chroma cylinders, connect upper and lower rings with vertical strips
 function createGeometry(edge1, edge2, reverseWinding = false) {
-  if (edge1.length < 3 || edge2.length < 3) {
-    throw new Error("Need at least 3 vertices in each strip");
+  if (edge1.length != edge2.length) {
+    throw new Error("lengths r diff");
   }
+  // if (edge1.length < 3 || edge2.length < 3) {
+  //   throw new Error("Need at least 3 vertices in each strip");
+  // }
   
   const positions = [];
   const indices = [];
