@@ -294,6 +294,8 @@ class Slicer {
     // cache cut surface material bc it needs to be retrieved multiple times
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
+      // debug
+      material.wireframe = true;
     }
     
     return material;
@@ -429,9 +431,6 @@ class Slicer {
     const hMin = this.uniforms.hueMin.value * 180 / Math.PI
     const hMax = this.uniforms.hueMax.value * 180 / Math.PI
 
-    console.log("hMin:", hMin, "hMax:", hMax);
-    console.log("vMin:", minV, "vMax:", maxV);
-
     // inner and outer edge of min and max hue planes
     const minInnerVertices = [];
     const minOuterVertices = [];
@@ -528,17 +527,13 @@ class Slicer {
   getMaxChroma(hue, value) {
     // edge cases white and black
     if (value <= 0 || value >= 10) {
-      console.log("white or black, returning 0");
       return 0;
     }
 
     // if already on the grid
     if (this.maxChroma[hue] && this.maxChroma[hue][value]) {
-      console.log("aligned to grid, returning canonical value");
       return this.maxChroma[hue][value];
     }
-
-    console.log("not aligned to grid");
 
     const hStep = 9;
 
@@ -565,10 +560,6 @@ class Slicer {
     const c10 = this.maxChroma[highHue][lowValue ] || 0; // bottom-right
     const c01 = this.maxChroma[lowHue ][highValue] || 0; // top-left
     const c11 = this.maxChroma[highHue][highValue] || 0; // top-right
-
-    console.log("lowHue, highHue = ", lowHue, ", ", highHue);
-    console.log("lowValue, highValue = ", lowValue, ", ", highValue);
-    console.log("corner values: ", c00, c10, c01, c11);
     
     // Calculate interpolation weights
     let hueWeight;
@@ -587,16 +578,15 @@ class Slicer {
     
     const valueWeight = (value - lowValue) / (highValue - lowValue);
     
-    // Bilinear interpolation
-    const c0 = c00 * (1 - hueWeight) + c10 * hueWeight;  // Interpolate along bottom edge
-    const c1 = c01 * (1 - hueWeight) + c11 * hueWeight;  // Interpolate along top edge
-    const result = c0 * (1 - valueWeight) + c1 * valueWeight; // Interpolate vertically
+    // bilinear interpolation
+    const c0 = c00 * (1 - hueWeight) + c10 * hueWeight;
+    const c1 = c01 * (1 - hueWeight) + c11 * hueWeight;
+    const result = c0 * (1 - valueWeight) + c1 * valueWeight;
     
 
-    console.log("hue, value, result: ", hue, value, result);
+    // console.log("hue, value, result: ", hue, value, result);
 
     return result;
-    
   }
 
 }
@@ -608,24 +598,17 @@ function clamp(num, min, max) {
 // creates planar polygon for a hue plane
 // taking edge of inner vertices and outer vertices, and connecting them with horizontal strips 
 function createHuePlane(innerVertices, outerVertices, reverseWinding = false) {
-  console.log("outer vertices: ", outerVertices);
-  console.log("inner vertices: ", innerVertices);
-  
   if (outerVertices.length < 3 || innerVertices.length < 3) {
     throw new Error("Need at least 3 vertices in each strip");
   }
   
   const positions = [];
   const indices = [];
-  let vertexIndex = 0;
   
-  // Add all vertices to positions array
-  // First add outer strip
+  // add all vertices to positions array, outer then inner strip
   outerVertices.forEach(vertex => {
     positions.push(vertex.x, vertex.y, vertex.z || 0);
   });
-  
-  // Then add inner strip
   innerVertices.forEach(vertex => {
     positions.push(vertex.x, vertex.y, vertex.z || 0);
   });
@@ -635,29 +618,24 @@ function createHuePlane(innerVertices, outerVertices, reverseWinding = false) {
   const outerOffset = 0;
   const innerOffset = outerCount;
   
-  // Create quads between corresponding segments of outer and inner strips
+  // create quads between corresponding segments of outer and inner strips
   const segmentCount = Math.min(outerCount, innerCount);
   
-  for (let i = 0; i < segmentCount; i++) {
-    const nextI = (i + 1) % segmentCount;
+  for (let i = 0; i < segmentCount - 1; i++) {
     
-    // Quad vertices (going around the quad)
-    const outerCurrent = outerOffset + i;
-    const outerNext = outerOffset + nextI;
-    const innerCurrent = innerOffset + i;
-    const innerNext = innerOffset + nextI;
+    // quad vertices
+    const outerLower = outerOffset + i;
+    const outerUpper = outerOffset + i + 1;
+    const innerLower = innerOffset + i;
+    const innerUpper = innerOffset + i + 1;
     
     // Create two triangles for this quad
     if (reverseWinding) {
-      // First triangle: outer-current, inner-current, outer-next
-      indices.push(outerCurrent, innerCurrent, outerNext);
-      // Second triangle: outer-next, inner-current, inner-next
-      indices.push(outerNext, innerCurrent, innerNext);
+      indices.push(outerLower, innerLower, outerUpper);
+      indices.push(outerUpper, innerLower, innerUpper);
     } else {
-      // First triangle: outer-current, outer-next, inner-current
-      indices.push(outerCurrent, outerNext, innerCurrent);
-      // Second triangle: outer-next, inner-next, inner-current
-      indices.push(outerNext, innerNext, innerCurrent);
+      indices.push(outerLower, outerUpper, innerLower);
+      indices.push(outerUpper, innerUpper, innerLower);
     }
   }
   
@@ -671,10 +649,7 @@ function createHuePlane(innerVertices, outerVertices, reverseWinding = false) {
   return geometry;
 }
 
-function createCylinderGeometry(
-  topPositions,
-  botPositions,
-  normalOutward = true
+function createCylinderGeometry(topVertices, botVertices, normalOutward = true
 ) {
   // todo
 }
