@@ -18,8 +18,8 @@ const meshes = {};
 const sceneConfigs = {
   default: {
     name: "Volume",
-    visible: ["shell"],
-    // visible: ["shell", "cutSurfaces"],
+    // visible: ["shell"],
+    visible: ["shell", "cutSurfaces"],
     hidden: ["pointcloud_interpolated", "pointcloud_original"],
   },
   pointCloud: {
@@ -296,7 +296,7 @@ class Slicer {
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
       // debug
-      material.wireframe = true;
+      // material.wireframe = true;
     }
     
     return material;
@@ -380,26 +380,32 @@ class Slicer {
     const materialPromise = this.getMaterial("cutSurface");
     materialPromise.then((material) => {
 
-      const huePlanes = this.huePlanes();
-      const valuePlanes = this.valuePlanes();
-      const chromaCyls = this.chromaCylinders();
+      // generates valid values to loop over - minH, (grid points in between), ... maxH
+      const hueLoop = this.hueLoop(this.uniforms.hueMin.value, this.uniforms.hueMin.value);
 
-      this.meshRefs.hueMinPlane = new THREE.Mesh(huePlanes.minPlane, material);
-      this.meshRefs.hueMaxPlane = new THREE.Mesh(huePlanes.maxPlane, material);
+      // create geometry for each cut surface
+      const surfaces = {
+        hueMinPlane: this.cutSurface("hue", false),
+        hueMaxPlane: this.cutSurface("hue", true),
+        valueMinPlane: this.cutSurface("value", false, hueLoop),
+        valueMaxPlane: this.cutSurface("value", true, hueLoop),
+        chromaMinCyl: this.cutSurface("chroma", false, hueLoop),
+        chromaMaxCyl: this.cutSurface("chroma", true, hueLoop)
+      };
 
-      this.meshRefs.valueMinPlane = new THREE.Mesh(valuePlanes.minPlane, material);
-      this.meshRefs.valueMaxPlane = new THREE.Mesh(valuePlanes.maxPlane, material);
+      // persist all surfaces to meshRefs
+      Object.entries(surfaces).forEach(([key, geometry]) => {
+        this.meshRefs[key] = new THREE.Mesh(geometry, material);
+      });
 
-      this.meshRefs.chromaMinCyl = new THREE.Mesh(chromaCyls.minCyl, material);
-      this.meshRefs.chromaMaxCyl = new THREE.Mesh(chromaCyls.maxCyl, material);
-      
-
+      // add all meshes to a group
       Object.values(this.meshRefs).forEach((mesh) => {
         if (mesh) {
           group.add(mesh);
         }
       });
 
+      // define the cut surface mesh to be this whole group
       const meshObj = {
         materials: material,
         mesh: group,
@@ -418,193 +424,101 @@ class Slicer {
     return group;
   }
 
-  // TODO:
-  // for each cut surface, create geometry for it and hook it up
-  // for the first and last vertices of the irregular edge, will need to lerp
-
-  // 2 hue planes (pie slice)
-  // max value, min value are always vertices.
-  huePlanes() {
-    // makes it easier to read
-    // minC, maxC, minV, maxV apply to both hue min and hue max planes
-    const minC = this.uniforms.chromaMin.value;
-    const maxC = this.uniforms.chromaMax.value;
-    const minV = this.uniforms.valueMin.value;
-    const maxV = this.uniforms.valueMax.value;
-    // convert hue to degrees
-    const hMin = this.uniforms.hueMin.value * 180 / Math.PI
-    const hMax = this.uniforms.hueMax.value * 180 / Math.PI
-
-    // inner and outer edge of min and max hue planes
-    const minInnerVertices = [];
-    const minOuterVertices = [];
-    const maxInnerVertices = [];
-    const maxOuterVertices = [];
-
-    // from bottom to top, starting from min value point
-    minInnerVertices.push(this.HVC_to_XYZ(hMin, minV, minC));
-    maxInnerVertices.push(this.HVC_to_XYZ(hMax, minV, minC));
-
-    minOuterVertices.push(this.HVC_to_XYZ(hMin, minV, clamp(this.getMaxChroma(hMin, minV), minC, maxC)));
-    maxOuterVertices.push(this.HVC_to_XYZ(hMax, minV, clamp(this.getMaxChroma(hMax, minV), minC, maxC)));
+  cutSurface(surfaceType, isMax, hueSequence = null) {
+    const minH = this.uniforms.hueMin.value * 180 / Math.PI, maxH = this.uniforms.hueMax.value * 180 / Math.PI;
+    const minV = this.uniforms.valueMin.value, maxV = this.uniforms.valueMax.value;
+    const minC = this.uniforms.chromaMin.value, maxC = this.uniforms.chromaMax.value;
     
-    // for in-between vertices, use grid points directly
-    for (let v = Math.floor(minV + 1); v < maxV; v += 1) {
-      minInnerVertices.push(this.HVC_to_XYZ(hMin, v, minC));
-      maxInnerVertices.push(this.HVC_to_XYZ(hMax, v, minC));
-
-      const c_hMin = this.getMaxChroma(hMin, v);
-      const c_hMax = this.getMaxChroma(hMax, v);
-      // clamp to be in between minC and maxC
-      minOuterVertices.push(this.HVC_to_XYZ(hMin, v, clamp(c_hMin, minC, maxC)));
-      maxOuterVertices.push(this.HVC_to_XYZ(hMax, v, clamp(c_hMax, minC, maxC)));
+    // surface type implies that is the fixed coordinate
+    let fixed;
+    if (surfaceType === "hue") {
+      fixed = isMax ? maxH : minH;
+    } else if (surfaceType === "value") {
+      fixed = isMax ? maxV : minV;
+    } else if (surfaceType === "chroma") {
+      fixed = isMax ? maxC : minC;
     }
-
-    minInnerVertices.push(this.HVC_to_XYZ(hMin, maxV, minC));
-    maxInnerVertices.push(this.HVC_to_XYZ(hMax, maxV, minC));
-
-    minOuterVertices.push(this.HVC_to_XYZ(hMin, maxV, clamp(this.getMaxChroma(hMin, maxV), minC, maxC)));
-    maxOuterVertices.push(this.HVC_to_XYZ(hMax, maxV, clamp(this.getMaxChroma(hMax, maxV), minC, maxC)));
-
-    // convert vertex lists to geometry
-    return {
-      minPlane: createGeometry(minInnerVertices, minOuterVertices),
-      maxPlane: createGeometry(maxInnerVertices, maxOuterVertices, true),
-    };
-  }
-
-  // 2 value planes (horizontal)
-  valuePlanes() {
-    // minC, maxC, minH, maxH apply to both value min and value max planes
-    const minC = this.uniforms.chromaMin.value;
-    const maxC = this.uniforms.chromaMax.value;
-    const minH = this.uniforms.hueMin.value * 180 / Math.PI
-    const maxH = this.uniforms.hueMax.value * 180 / Math.PI
-
-    const vMin = this.uniforms.valueMin.value;
-    const vMax = this.uniforms.valueMax.value;
-
-
-    const minInnerVertices = [];
-    const minOuterVertices = [];
-    const maxInnerVertices = [];
-    const maxOuterVertices = [];
-
-    // CCW from minH
-    minInnerVertices.push(this.HVC_to_XYZ(minH, vMin, minC));
-    maxInnerVertices.push(this.HVC_to_XYZ(minH, vMax, minC));
-    minOuterVertices.push(this.HVC_to_XYZ(minH, vMin, clamp(this.getMaxChroma(minH, vMin), minC, maxC)));
-    maxOuterVertices.push(this.HVC_to_XYZ(minH, vMax, clamp(this.getMaxChroma(minH, vMax), minC, maxC)));
-
-    // handle hue wraparound
-    const hueSpan = maxH > minH ? maxH - minH : (360 - minH) + maxH;
-    const numSteps = Math.floor(hueSpan / 9);
-    const startH = Math.ceil(minH / 9) * 9;
-
-    // for every h from minH to maxH in increments of 9, (grid points only)
-    for (let i = 1; i < numSteps; i++) {
-      const h = (startH + i * 9) % 360;
-      
-      minInnerVertices.push(this.HVC_to_XYZ(h, vMin, minC));
-      maxInnerVertices.push(this.HVC_to_XYZ(h, vMax, minC));
-
-      const c_hMin = this.getMaxChroma(h, vMin);
-      const c_hMax = this.getMaxChroma(h, vMax);
-      // clamp to be in between minC and maxC
-      minOuterVertices.push(this.HVC_to_XYZ(h, vMin, clamp(c_hMin, minC, maxC)));
-      maxOuterVertices.push(this.HVC_to_XYZ(h, vMax, clamp(c_hMax, minC, maxC)));
-    }
-
-    minInnerVertices.push(this.HVC_to_XYZ(maxH, vMin, minC));
-    maxInnerVertices.push(this.HVC_to_XYZ(maxH, vMax, minC));
-    minOuterVertices.push(this.HVC_to_XYZ(maxH, vMin, clamp(this.getMaxChroma(minH, vMin), minC, maxC)));
-    maxOuterVertices.push(this.HVC_to_XYZ(maxH, vMax, clamp(this.getMaxChroma(minH, vMax), minC, maxC)));
-
-    return {
-      minPlane: createGeometry(minInnerVertices, minOuterVertices, true),
-      maxPlane: createGeometry(maxInnerVertices, maxOuterVertices)
-    }
-  }
-
-  chromaCylinders() {
-    // minH, maxH, minV, maxV apply to both chroma min and chroma max cylinders
-    const minH = this.uniforms.hueMin.value * 180 / Math.PI
-    const maxH = this.uniforms.hueMax.value * 180 / Math.PI
-    const minV = this.uniforms.valueMin.value;
-    const maxV = this.uniforms.valueMax.value;
-
-    const cMin = this.uniforms.chromaMin.value;
-    const cMax = this.uniforms.chromaMax.value;
-
-    const minBotVertices = [];
-    const minTopVertices = [];
-    const maxBotVertices = [];
-    const maxTopVertices = [];
     
-    // todo : this actually needs to be clamped as well, so should just do it in one loop
-    // CCW from minH
-    minBotVertices.push(this.HVC_to_XYZ(minH, minV, cMin));
-    minTopVertices.push(this.HVC_to_XYZ(minH, maxV, cMin));
-    maxBotVertices.push(this.HVC_to_XYZ(minH, minV, cMax));
-    maxTopVertices.push(this.HVC_to_XYZ(minH, maxV, cMax));
-
-    // handle hue wraparound
-    const hueSpan = maxH > minH ? maxH - minH : (360 - minH) + maxH;
-    const numSteps = Math.floor(hueSpan / 9);
-    const startH = Math.ceil(minH / 9) * 9;
-
-    // for every h from minH to maxH in increments of 9, (grid points only)
-    for (let i = 1; i < numSteps; i++) {
-      const h = (startH + i * 9) % 360;
-
-      // minimum and maximum value for this chroma at this hue
-      let vMin_cMin = maxV; // Start with max, find minimum valid V
-      let vMax_cMin = minV; // Start with min, find maximum valid V
-      let vMin_cMax = maxV;
-      let vMax_cMax = minV;
-
-      // for every v from minV to max V on the grid, 
-      // loop over v values to obtain 
-      // which ones are actually in that chroma range
-      // later i should do this with two pointer
+    // set the values we're gonna loop over - value for hue planes, hue for the other 2
+    let loop;
+    if (surfaceType === "hue") {
+      loop = [minV];
       for (let v = Math.floor(minV + 1); v < maxV; v += 1) {
-        // max chroma at this hue and value combination
-        const maxChroma = this.getMaxChroma(h, v);
-        // if this hue and value are contained within the chroma boundary,
-        // Check if cMin is achievable at this V
-        if (cMin <= maxChroma) {
-          vMin_cMin = Math.min(vMin_cMin, v);
-          vMax_cMin = Math.max(vMax_cMin, v);
-        }
-        
-        // Check if cMax is achievable at this V  
-        if (cMax <= maxChroma) {
-          vMin_cMax = Math.min(vMin_cMax, v);
-          vMax_cMax = Math.max(vMax_cMax, v);
-        }
+        loop.push(v);
       }
+      loop.push(maxV);
+    } else {
+      loop = hueSequence;
+    }
+    
+    // smaller numbers = lower or inner edge loop
+    // bigger numbers = upper or outer edge loop
+    const vertices1 = [];
+    const vertices2 = [];
+    
+    // for each point in the varying coordinate,
+    for (const val of loop) {
+      if (surfaceType === "hue") {
+        // hue=fixed, value=varying, chroma=clamped
+        const h = fixed;
+        const v = val;
+        const maxChroma = this.getMaxChroma(h, v);
+
+        vertices1.push(this.HVC_to_XYZ(h, v, minC));
+        vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
         
-      // clamp v to only the values that actually contain something in that chroma range
-      const clampedMinV_cMin = clamp(minV, vMin_cMin, vMax_cMin);
-      const clampedMaxV_cMin = clamp(maxV, vMin_cMin, vMax_cMin);
-      const clampedMinV_cMax = clamp(minV, vMin_cMax, vMax_cMax);
-      const clampedMaxV_cMax = clamp(maxV, vMin_cMax, vMax_cMax);
-      
-      minBotVertices.push(this.HVC_to_XYZ(h, clampedMinV_cMin, cMin));
-      minTopVertices.push(this.HVC_to_XYZ(h, clampedMaxV_cMin, cMin));
-      maxBotVertices.push(this.HVC_to_XYZ(h, clampedMinV_cMax, cMax));
-      maxTopVertices.push(this.HVC_to_XYZ(h, clampedMaxV_cMax, cMax));
-    }       
+      } else if (surfaceType === "value") {
+        // hue=varying, value=fixed, chroma=clamped
+        const h = val;
+        const v = fixed;
+        const maxChroma = this.getMaxChroma(h, v);
+        
+        vertices1.push(this.HVC_to_XYZ(h, v, minC));
+        vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
+        
+      } else if (surfaceType === "chroma") {
+        // hue=varying, chroma=fixed, value=clamped
+        const h = val;
+        const c = fixed;
+        
+        // find valid value range for this hue at this chroma
+        const { validMinV, validMaxV } = this.valueRange(h, c, minV, maxV);
+        const clampedMinV = clamp(minV, validMinV, validMaxV);
+        const clampedMaxV = clamp(maxV, validMinV, validMaxV);
+        
+        // bottom edge
+        vertices1.push(this.HVC_to_XYZ(h, clampedMinV, c));
+        // top edge
+        vertices2.push(this.HVC_to_XYZ(h, clampedMaxV, c));
+      }
+    }
+    
+    // todo: determine winding orders later
+    return createGeometry(vertices1, vertices2, true);
+  }
 
-    minBotVertices.push(this.HVC_to_XYZ(maxH, minV, cMin));
-    minTopVertices.push(this.HVC_to_XYZ(maxH, maxV, cMin));
-    maxBotVertices.push(this.HVC_to_XYZ(maxH, minV, cMax));
-    maxTopVertices.push(this.HVC_to_XYZ(maxH, maxV, cMax));
-
+  // temp
+  valueRange(h, c, minV, maxV) {
     return {
-      minCyl: createGeometry(minTopVertices, minBotVertices, false),
-      maxCyl: createGeometry(maxTopVertices, maxBotVertices),
+      validMinV: 0,
+      validMaxV: 10
     };
+  }
+  
+  hueLoop(minH, maxH) {
+    // handle hue wraparound
+    const hueSpan = maxH > minH ? maxH - minH : (360 - minH) + maxH;
+    const numSteps = Math.floor(hueSpan / 9);
+    const startH = Math.ceil(minH / 9) * 9;
+
+    const sequence = [minH];
+    // for every h from minH to maxH in increments of 9 (the grid points)
+    for (let i = 1; i < numSteps; i++) {
+      sequence.push(startH + i * 9) % 360;
+    }
+    sequence.push(maxH);
+
+    return sequence;
   }
 
   // cylindrical to cartesian coordinate helpers
@@ -710,9 +624,6 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
   if (edge1.length != edge2.length) {
     throw new Error("lengths r diff");
   }
-  // if (edge1.length < 3 || edge2.length < 3) {
-  //   throw new Error("Need at least 3 vertices in each strip");
-  // }
   
   const positions = [];
   const indices = [];
@@ -751,10 +662,10 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
     }
   }
 
-  console.log("First 3 outer:", edge1.slice(0, 3));
-  console.log("First 3 inner:", edge2.slice(0, 3));
-  console.log("Last 3 outer:" , edge1.slice(-3));
-  console.log("Last 3 inner:" , edge2.slice(-3));
+  // console.log("First 3 outer:", edge1.slice(0, 3));
+  // console.log("First 3 inner:", edge2.slice(0, 3));
+  // console.log("Last 3 outer:" , edge1.slice(-3));
+  // console.log("Last 3 inner:" , edge2.slice(-3));
   
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
