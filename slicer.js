@@ -116,7 +116,7 @@ class Slicer {
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
       // debug
-      material.wireframe = true;
+    //   material.wireframe = true;
     }
     
     return material;
@@ -167,7 +167,6 @@ class Slicer {
 
       // generates valid values to loop over - minH, (grid points in between), ... maxH
       const hueLoop = this.hueLoop(this.uniforms.hueMin.value, this.uniforms.hueMax.value);
-      console.log(hueLoop);
 
       // create geometry for each cut surface
       const surfaces = {
@@ -259,7 +258,8 @@ class Slicer {
         // hue=varying, chroma=fixed, value=clamped
         const h = val;
         const c = fixed;
-        
+
+        // todo: skip nulls here or in createGeomtry bc it might not be a continuous cylinder
         // find valid value range for this hue at this chroma
         const { validMinV, validMaxV } = this.valueRange(h, c, minV, maxV);
         const clampedMinV = clamp(minV, validMinV, validMaxV);
@@ -277,10 +277,44 @@ class Slicer {
   }
 
   // temp
+  // finds minimum and maximum value that is inside the volume at this chroma
+  // TODO: PROBLEM IS THIS ONLY CHECKS INTEGERS SO THERE ARE GAPS
   valueRange(h, c, minV, maxV) {
+    let left = Math.floor(minV);
+    let right = Math.ceil(maxV);
+    let validMinV = null;
+    let validMaxV = null;
+    
+    // two pointer approach
+    while (left <= right && (validMinV === null || validMaxV === null)) {
+        // check left pointer if we haven't found validMinV yet
+        if (validMinV === null) {
+            const maxChromaLeft = this.getMaxChroma(h, left);
+            if (c <= maxChromaLeft) {
+                validMinV = left;
+            } else {
+                left++;
+            }
+        }
+        
+        // check right pointer if we haven't found validMaxV yet
+        if (validMaxV === null && left <= right) {
+            const maxChromaRight = this.getMaxChroma(h, right);
+            if (c <= maxChromaRight) {
+                validMaxV = right;
+            } else {
+                right--;
+            }
+        }
+    }
+
+    //fallbacks
+    validMinV = validMinV ?? maxV;
+    validMaxV = validMaxV ?? minV;
+    
     return {
-      validMinV: 0,
-      validMaxV: 10
+      validMinV,
+      validMaxV
     };
   }
   
