@@ -1,20 +1,18 @@
 import * as THREE from "three";
 import { OrbitControls } from "OrbitControls";
+import { Slicer } from './slicer.js';
+import { CircularSlider, TwoHandleSlider } from './ui.js';
 
 // globals
 let scene, camera, renderer, controls;
 let slicer;
 let isPaused = false;
 
-// Y scaling factor so value 0-10 looks bigger
-const Y_SCALE = 3;
-
 // dictionary of meshes
 // keys: "shell", "pointcloud", "pointcloud_original, cutSurfaces"
 // todo: maybe just store the meshes instead of the whole meshobj. i dont bother with any of the other fields anyways
 const meshes = {};
 
-// Scene configurations
 const sceneConfigs = {
   default: {
     name: "Volume",
@@ -116,6 +114,7 @@ function initUI() {
   const circularHueSlider = new CircularSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
     slicer.setHueRange(range.start, range.end);
+    updateCutSurfaces();
   };
   circularHueSlider.onChange(circularHueSlider.getHueRange());
 
@@ -123,6 +122,7 @@ function initUI() {
   const valueSlider = new TwoHandleSlider("value-slider", 0, 10);
   valueSlider.onChange = (range) => {
     slicer.setValueRange(range.start, range.end);
+    updateCutSurfaces();
   };
   valueSlider.onChange(valueSlider.getValues());
 
@@ -130,9 +130,10 @@ function initUI() {
   const chromaSlider = new TwoHandleSlider("chroma-slider", 0, 38);
   chromaSlider.onChange = (range) => {
     slicer.setChromaRange(range.start, range.end);
+    updateCutSurfaces();
   };
   // idk initalize it to some random colors
-  chromaSlider.setGradient("#808080", "#ff9b00");
+  chromaSlider.setGradient("#808080", "#ff0000");
   chromaSlider.onChange(chromaSlider.getValues());
 
   // set scene
@@ -158,20 +159,6 @@ function switchScene(sceneKey) {
     }
   });
 
-  // // hide all meshes
-  // Object.keys(meshes).forEach((meshName) => {
-  //   if (meshes[meshName] && meshes[meshName].mesh) {
-  //     meshes[meshName].mesh.visible = false;
-  //   }
-  // });
-
-  // // show only the meshes specified in the scene config
-  // config.visible.forEach((meshName) => {
-  //   if (meshes[meshName] && meshes[meshName].mesh) {
-  //     meshes[meshName].mesh.visible = true;
-  //   }
-  // });
-
   const toggleLightButton = document.getElementById("toggle-light");
   const toggleRGBButton = document.getElementById("toggle-rgb");
 
@@ -184,759 +171,6 @@ function switchScene(sceneKey) {
   }
 }
 
-class Slicer {
-  constructor() {
-    this.uniforms = {
-      hueMin: { value: 0.0 },
-      hueMax: { value: 2 * Math.PI },
-      chromaMin: { value: 0.0 },
-      chromaMax: { value: 38.0 },
-      valueMin: { value: 0.0 },
-      valueMax: { value: 10.0 },
-      uSize: { value: 10.0 }, // point size for point clouds
-      useLighting: { value: 0.0 },
-      showOutsideRGB: { value: 1.0 },
-      interiorTexture: { value: null },
-    };
-
-    this.shadersPromise = this.loadShaders();
-    this.loadTextures();
-
-    // load max chroma dictionary from jsons
-    this.maxChromaPromise = this.loadMaxChromaDict();
-    this.maxChroma = null;
-    this.maxChromaPromise.then((data) => {
-      this.maxChroma = data;
-    });
-
-    // pointer for future cut surface material
-    this.cutSurfaceMaterial = null;
-
-    // group of mesh geometries
-    this.group = this.updateCutSurfaces();
-
-    // individual mesh references
-    this.meshRefs = {
-      hueMinPlane: null,
-      hueMaxPlane: null,
-      valueMinPlane: null,
-      valueMaxPlane: null,
-      chromaMinCyl: null,
-      chromaMaxCyl: null,
-    };
-  }
-
-  async loadShaders() {
-    const [
-      meshVertex,
-      meshFragment,
-      pointsVertex,
-      pointsFragment,
-      sliceVertex,
-      sliceFragment,
-    ] = await Promise.all([
-      fetch("./shaders/mesh_vertex.glsl").then((r) => r.text()),
-      fetch("./shaders/mesh_fragment.glsl").then((r) => r.text()),
-      fetch("./shaders/points_vertex.glsl").then((r) => r.text()),
-      fetch("./shaders/points_fragment.glsl").then((r) => r.text()),
-      fetch("./shaders/slice_vertex.glsl").then((r) => r.text()),
-      fetch("./shaders/slice_fragment.glsl").then((r) => r.text()),
-    ]);
-
-    return {
-      meshVertex,
-      meshFragment,
-      pointsVertex,
-      pointsFragment,
-      sliceVertex,
-      sliceFragment,
-    };
-  }
-
-  async loadTextures() {
-    const texture3D = await load3DTexture("./texture3d_64.bin", 64);
-    this.uniforms.interiorTexture.value = texture3D;
-  }
-
-  async getMaterial(type) {
-    const shaders = await this.shadersPromise;
-
-    // return cached cutSurface material if it exists
-    if (type === "cutSurface" && this.cutSurfaceMaterial) {
-      return this.cutSurfaceMaterial;
-    }
-
-    let vertexShader, fragmentShader, side;
-    if (type === "points") {
-      vertexShader = shaders.pointsVertex;
-      fragmentShader = shaders.pointsFragment;
-      side = THREE.FrontSide;
-    } else if (type === "mesh") {
-      vertexShader = shaders.meshVertex;
-      fragmentShader = shaders.meshFragment;
-      side = THREE.DoubleSide;
-    } else if (type === "cutSurface") {
-      vertexShader = shaders.sliceVertex;
-      fragmentShader = shaders.sliceFragment;
-      // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way
-      side = THREE.DoubleSide;
-    } else {
-      throw new Error(`Unsupported type: ${type}`);
-    }
-
-    const material = new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      uniforms: this.uniforms,
-      transparent: true,
-      side: side,
-    });
-
-    // cache cut surface material bc it needs to be retrieved multiple times
-    if (type === "cutSurface") {
-      this.cutSurfaceMaterial = material;
-      // debug
-      // material.wireframe = true;
-    }
-    
-    return material;
-  }
-
-  async loadMaxChromaDict() {
-    const response = await fetch("max_chroma.json");
-    const data = await response.json();
-
-    return Object.fromEntries(
-      Object.entries(data).map(([h, values]) => [
-        parseFloat(h),
-        Object.fromEntries(
-          Object.entries(values).map(([v, chroma]) => [parseFloat(v), chroma])
-        ),
-      ])
-    );
-  }
-
-  setHueRange(min, max) {
-    this.uniforms.hueMin.value = (min * Math.PI) / 180;
-    this.uniforms.hueMax.value = (max * Math.PI) / 180;
-    this.updateCutSurfaces();
-  }
-
-  setChromaRange(min, max) {
-    this.uniforms.chromaMin.value = min;
-    this.uniforms.chromaMax.value = max;
-    this.updateCutSurfaces();
-  }
-
-  setValueRange(min, max) {
-    this.uniforms.valueMin.value = min;
-    this.uniforms.valueMax.value = max;
-    this.updateCutSurfaces();
-  }
-
-  toggleLighting() {
-    this.uniforms.useLighting.value = 1 - this.uniforms.useLighting.value;
-  }
-
-  toggleRGB() {
-    this.uniforms.showOutsideRGB.value = 1 - this.uniforms.showOutsideRGB.value;
-  }
-
-  // updates cut surface positions when min/max h,v,c change
-  updateCutSurfaces() {
-    if (!this.maxChroma) {
-      // console.log("maxChroma still loading");
-      return;
-    }
-
-    // dispose of old surfaces
-    if (meshes["cutSurfaces"]) {
-      // remove from scene
-      scene.remove(meshes["cutSurfaces"].mesh);
-      // dispose of both geometries and materials
-      meshes["cutSurfaces"].mesh.traverse((child) => {
-        if (child.geometry) {
-          child.geometry.dispose();
-        }
-        if (child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach((mat) => mat.dispose());
-          } else {
-            child.material.dispose();
-          }
-        }
-      });
-      // clear entry from meshes
-      delete meshes["cutSurfaces"];
-    }
-
-    // references
-    Object.keys(this.meshRefs).forEach((key) => {
-      this.meshRefs[key] = null;
-    });
-
-    const group = new THREE.Group();
-
-    const materialPromise = this.getMaterial("cutSurface");
-    materialPromise.then((material) => {
-
-      // generates valid values to loop over - minH, (grid points in between), ... maxH
-      const hueLoop = this.hueLoop(this.uniforms.hueMin.value, this.uniforms.hueMin.value);
-
-      // create geometry for each cut surface
-      const surfaces = {
-        hueMinPlane: this.cutSurface("hue", false),
-        hueMaxPlane: this.cutSurface("hue", true),
-        valueMinPlane: this.cutSurface("value", false, hueLoop),
-        valueMaxPlane: this.cutSurface("value", true, hueLoop),
-        chromaMinCyl: this.cutSurface("chroma", false, hueLoop),
-        chromaMaxCyl: this.cutSurface("chroma", true, hueLoop)
-      };
-
-      // persist all surfaces to meshRefs
-      Object.entries(surfaces).forEach(([key, geometry]) => {
-        this.meshRefs[key] = new THREE.Mesh(geometry, material);
-      });
-
-      // add all meshes to a group
-      Object.values(this.meshRefs).forEach((mesh) => {
-        if (mesh) {
-          group.add(mesh);
-        }
-      });
-
-      // define the cut surface mesh to be this whole group
-      const meshObj = {
-        materials: material,
-        mesh: group,
-        config: "cutSurface",
-      };
-
-      // copy rotation of shell mesh
-      if (meshes["shell"] && meshes["shell"].mesh) {
-        group.rotation.copy(meshes["shell"].mesh.rotation);
-      }
-
-      scene.add(group);
-      meshes["cutSurfaces"] = meshObj;
-    });
-
-    return group;
-  }
-
-  cutSurface(surfaceType, isMax, hueSequence = null) {
-    const minH = this.uniforms.hueMin.value * 180 / Math.PI, maxH = this.uniforms.hueMax.value * 180 / Math.PI;
-    const minV = this.uniforms.valueMin.value, maxV = this.uniforms.valueMax.value;
-    const minC = this.uniforms.chromaMin.value, maxC = this.uniforms.chromaMax.value;
-    
-    // surface type implies that is the fixed coordinate
-    let fixed;
-    if (surfaceType === "hue") {
-      fixed = isMax ? maxH : minH;
-    } else if (surfaceType === "value") {
-      fixed = isMax ? maxV : minV;
-    } else if (surfaceType === "chroma") {
-      fixed = isMax ? maxC : minC;
-    }
-    
-    // set the values we're gonna loop over - value for hue planes, hue for the other 2
-    let loop;
-    if (surfaceType === "hue") {
-      loop = [minV];
-      for (let v = Math.floor(minV + 1); v < maxV; v += 1) {
-        loop.push(v);
-      }
-      loop.push(maxV);
-    } else {
-      loop = hueSequence;
-    }
-    
-    // smaller numbers = lower or inner edge loop
-    // bigger numbers = upper or outer edge loop
-    const vertices1 = [];
-    const vertices2 = [];
-    
-    // for each point in the varying coordinate,
-    for (const val of loop) {
-      if (surfaceType === "hue") {
-        // hue=fixed, value=varying, chroma=clamped
-        const h = fixed;
-        const v = val;
-        const maxChroma = this.getMaxChroma(h, v);
-
-        vertices1.push(this.HVC_to_XYZ(h, v, minC));
-        vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
-        
-      } else if (surfaceType === "value") {
-        // hue=varying, value=fixed, chroma=clamped
-        const h = val;
-        const v = fixed;
-        const maxChroma = this.getMaxChroma(h, v);
-        
-        vertices1.push(this.HVC_to_XYZ(h, v, minC));
-        vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
-        
-      } else if (surfaceType === "chroma") {
-        // hue=varying, chroma=fixed, value=clamped
-        const h = val;
-        const c = fixed;
-        
-        // find valid value range for this hue at this chroma
-        const { validMinV, validMaxV } = this.valueRange(h, c, minV, maxV);
-        const clampedMinV = clamp(minV, validMinV, validMaxV);
-        const clampedMaxV = clamp(maxV, validMinV, validMaxV);
-        
-        // bottom edge
-        vertices1.push(this.HVC_to_XYZ(h, clampedMinV, c));
-        // top edge
-        vertices2.push(this.HVC_to_XYZ(h, clampedMaxV, c));
-      }
-    }
-    
-    // todo: determine winding orders later
-    return createGeometry(vertices1, vertices2, true);
-  }
-
-  // temp
-  valueRange(h, c, minV, maxV) {
-    return {
-      validMinV: 0,
-      validMaxV: 10
-    };
-  }
-  
-  hueLoop(minH, maxH) {
-    // handle hue wraparound
-    const hueSpan = maxH > minH ? maxH - minH : (360 - minH) + maxH;
-    const numSteps = Math.floor(hueSpan / 9);
-    const startH = Math.ceil(minH / 9) * 9;
-
-    const sequence = [minH];
-    // for every h from minH to maxH in increments of 9 (the grid points)
-    for (let i = 1; i < numSteps; i++) {
-      sequence.push(startH + i * 9) % 360;
-    }
-    sequence.push(maxH);
-
-    return sequence;
-  }
-
-  // cylindrical to cartesian coordinate helpers
-  HVC_to_XYZ(h, v, c) {
-    const hueRadians = (h * Math.PI) / 180.0;
-    const x = c * Math.cos(hueRadians);
-    const y = Y_SCALE * v;
-    const z = c * Math.sin(hueRadians);
-
-    return { x, y, z };
-  }
-
-  XYZ_to_HVC(x, y, z) {
-    const v = y / Y_SCALE;
-    const c = Math.sqrt(x * x + z * z);
-    let h = (Math.atan2(z, x) * 180.0) / Math.PI;
-    if (h < 0) {
-      h += 360;
-    }
-
-    return { h, v, c };
-  }
-
-  // todo: might need to account for triangles
-  // (the line goes from upper left to lower right)
-  getMaxChroma(hue, value) {
-    // edge cases white and black
-    if (value <= 0 || value >= 10) {
-      return 0;
-    }
-
-    // if already on the grid
-    if (this.maxChroma[hue] && this.maxChroma[hue][value]) {
-      return this.maxChroma[hue][value];
-    }
-
-    const hStep = 9;
-
-    let lowHue = Math.floor(hue / hStep) * hStep;
-    let highHue = lowHue + hStep;
-
-    // Handle hue wraparound at 0/360 boundary
-    if (lowHue === 0) {
-        lowHue = 360;
-        highHue = 9;
-    } else if (highHue > 360) {
-        highHue = 9; // Wrap around to 9
-    } else if (lowHue === 360) {
-        lowHue = 360;
-        highHue = 9;
-    }
-
-    // Find surrounding value levels (integers)
-    const lowValue = Math.floor(value);
-    const highValue = Math.min(10, lowValue + 1);
-
-    // Get the 4 corner values for bilinear interpolation
-    const c00 = this.maxChroma[lowHue ][lowValue ] || 0; // bottom-left
-    const c10 = this.maxChroma[highHue][lowValue ] || 0; // bottom-right
-    const c01 = this.maxChroma[lowHue ][highValue] || 0; // top-left
-    const c11 = this.maxChroma[highHue][highValue] || 0; // top-right
-    
-    // Calculate interpolation weights
-    let hueWeight;
-    if (lowHue === 360 && highHue === 9) {
-        // Special case for wraparound
-        if (hue <= 180) {
-            // targetHue is closer to 9 than 360
-            hueWeight = (hue + 360 - 360) / (9 + 360 - 360);
-        } else {
-            // targetHue is closer to 360
-            hueWeight = (hue - 360) / (9 + 360 - 360);
-        }
-    } else {
-        hueWeight = (hue - lowHue) / (highHue - lowHue);
-    }
-    
-    const valueWeight = (value - lowValue) / (highValue - lowValue);
-    
-    // bilinear interpolation
-    const c0 = c00 * (1 - hueWeight) + c10 * hueWeight;
-    const c1 = c01 * (1 - hueWeight) + c11 * hueWeight;
-    const result = c0 * (1 - valueWeight) + c1 * valueWeight;
-    
-    // console.log("hue, value, result: ", hue, value, result);
-
-    return result;
-  }
-
-}
-
-function clamp(num, min, max) {
-  return Math.min(Math.max(num, min), max)
-}
-
-// creates geometry by connecting the 2 edges with quadrilateral strips
-// e.g. for hue plane, input is an edge of inner vertices and outer vertices, connect them with horizontal rectangles
-// (when edges converge to 1 points at top and bottom, just make a triangle degenerate)
-// for value plane, input is inner ring and outer ring, connect them with trapezoids
-// (if whole plane is included just means half of them are degenerate)
-// for chroma cylinders, connect upper and lower rings with vertical strips
-function createGeometry(edge1, edge2, reverseWinding = false) {
-  if (edge1.length != edge2.length) {
-    throw new Error("lengths r diff");
-  }
-  
-  const positions = [];
-  const indices = [];
-  
-  // add all vertices to positions array, outer then inner strip
-  edge1.forEach(vertex => {
-    positions.push(vertex.x, vertex.y, vertex.z || 0);
-  });
-  edge2.forEach(vertex => {
-    positions.push(vertex.x, vertex.y, vertex.z || 0);
-  });
-  
-  const edge1Count = edge1.length;
-  const edge2Count = edge2.length;
-  const edge1offset = 0;
-  const edge2offset = edge1Count;
-  
-  // create quads between corresponding segments of outer and inner strips
-  const segmentCount = Math.min(edge1Count, edge2Count);
-  
-  for (let i = 0; i < segmentCount - 1; i++) {
-    
-    // quad vertices
-    const v00 = edge1offset + i;
-    const v01 = edge1offset + i + 1;
-    const v10 = edge2offset + i;
-    const v11 = edge2offset + i + 1;
-    
-    // create two triangles for this quad
-    if (reverseWinding) {
-      indices.push(v00, v10, v01);
-      indices.push(v01, v10, v11);
-    } else {
-      indices.push(v00, v01, v10);
-      indices.push(v01, v11, v10);
-    }
-  }
-
-  // console.log("First 3 outer:", edge1.slice(0, 3));
-  // console.log("First 3 inner:", edge2.slice(0, 3));
-  // console.log("Last 3 outer:" , edge1.slice(-3));
-  // console.log("Last 3 inner:" , edge2.slice(-3));
-  
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(positions, 3)
-  );
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-class CircularSlider {
-  constructor(containerId) {
-    this.container = document.getElementById(containerId);
-    this.handle1 = document.getElementById("handle1");
-    this.handle2 = document.getElementById("handle2");
-    this.arcFill = document.getElementById("arc-fill");
-
-    this.centerX = 100;
-    this.centerY = 100;
-    this.radius = 90;
-
-    this.angle1 = 0;
-    this.angle2 = 360;
-
-    this.isDragging = false;
-    this.activeHandle = null;
-    this.onChange = null;
-
-    this.init();
-    this.updateDisplay();
-  }
-
-  init() {
-    this.handle1.addEventListener("mousedown", (e) =>
-      this.startDrag(e, "handle1")
-    );
-    this.handle2.addEventListener("mousedown", (e) =>
-      this.startDrag(e, "handle2")
-    );
-    document.addEventListener("mousemove", (e) => this.drag(e));
-    document.addEventListener("mouseup", () => this.endDrag());
-  }
-
-  startDrag(e, handleId) {
-    e.preventDefault();
-    this.isDragging = true;
-    this.activeHandle = handleId;
-
-    if (handleId === "handle1") {
-      this.handle1.classList.add("active");
-    } else {
-      this.handle2.classList.add("active");
-    }
-  }
-
-  drag(e) {
-    if (!this.isDragging || !this.activeHandle) return;
-
-    e.preventDefault();
-
-    const rect = this.container.getBoundingClientRect();
-    const x = e.clientX - rect.left - this.centerX;
-    const y = e.clientY - rect.top - this.centerY;
-
-    let angle = (Math.atan2(y, x) * 180) / Math.PI;
-    if (angle < 0) angle += 360;
-
-    if (this.activeHandle === "handle1") {
-      this.angle1 = angle;
-    } else {
-      this.angle2 = angle;
-    }
-
-    this.updateDisplay();
-    this.notifyChange();
-  }
-
-  endDrag() {
-    this.isDragging = false;
-    this.activeHandle = null;
-    this.handle1.classList.remove("active");
-    this.handle2.classList.remove("active");
-  }
-
-  updateDisplay() {
-    this.positionHandle(this.handle1, this.angle1);
-    this.positionHandle(this.handle2, this.angle2);
-    this.updateArcFill();
-  }
-
-  positionHandle(handle, angle) {
-    const radian = (angle * Math.PI) / 180;
-    const x = this.centerX + Math.cos(radian) * this.radius;
-    const y = this.centerY + Math.sin(radian) * this.radius;
-
-    handle.style.left = x + "px";
-    handle.style.top = y + "px";
-  }
-
-  updateArcFill() {
-    const centerX = 100;
-    const centerY = 100;
-    const inner_radius = 82; // Inner edge of the color wheel
-    const outer_radius = 98; // outer edge
-
-    // Convert angles to radians
-    const start = (this.angle1 * Math.PI) / 180;
-    const end = (this.angle2 * Math.PI) / 180;
-
-    // Calculate start and end points on the inner circle
-    const x1_r = centerX + inner_radius * Math.cos(start);
-    const y1_r = centerY + inner_radius * Math.sin(start);
-    const x2_r = centerX + inner_radius * Math.cos(end);
-    const y2_r = centerY + inner_radius * Math.sin(end);
-
-    // Calculate start and end points on the OUTER circle
-    const x1_R = centerX + outer_radius * Math.cos(start);
-    const y1_R = centerY + outer_radius * Math.sin(start);
-    const x2_R = centerX + outer_radius * Math.cos(end);
-    const y2_R = centerY + outer_radius * Math.sin(end);
-
-    // Calculate the arc span
-    let arcSpan = this.angle2 - this.angle1;
-    // Handle wraparound. wraparound if the handles are on top of each other too
-    if (arcSpan <= 0) arcSpan += 360;
-
-    // draw full circle if the handles are on top of each other
-    if (arcSpan === 360) {
-      const pathData_inner = `M ${
-        centerX - inner_radius
-      } ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${
-        centerX + inner_radius
-      } ${centerY} A ${inner_radius} ${inner_radius} 0 1 1 ${
-        centerX - inner_radius
-      } ${centerY}`;
-      const pathData_outer = `M ${
-        centerX - outer_radius
-      } ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${
-        centerX + outer_radius
-      } ${centerY} A ${outer_radius} ${outer_radius} 0 1 1 ${
-        centerX - outer_radius
-      } ${centerY}`;
-
-      document
-        .getElementById("arc-path-inner")
-        .setAttribute("d", pathData_inner);
-      document
-        .getElementById("arc-path-outer")
-        .setAttribute("d", pathData_outer);
-      return;
-    }
-
-    // Determine if it's a large arc (>180 degrees)
-    const largeArc = arcSpan > 180 ? 1 : 0;
-
-    // Create the SVG inner arc path
-    const pathData_inner = `M ${x1_r} ${y1_r} A ${inner_radius} ${inner_radius} 0 ${largeArc} 1 ${x2_r} ${y2_r}`;
-    document.getElementById("arc-path-inner").setAttribute("d", pathData_inner);
-    // outer arc path
-    const pathData_outer = `M ${x1_R} ${y1_R} A ${outer_radius} ${outer_radius} 0 ${largeArc} 1 ${x2_R} ${y2_R}`;
-    document.getElementById("arc-path-outer").setAttribute("d", pathData_outer);
-  }
-
-  getHueRange() {
-    return {
-      start: this.angle1,
-      end: this.angle2,
-      wrapsAround: this.angle1 > this.angle2,
-    };
-  }
-
-  notifyChange() {
-    if (this.onChange) {
-      this.onChange(this.getHueRange());
-    }
-  }
-}
-
-// double sided sliders for value and chroma
-class TwoHandleSlider {
-  constructor(containerId, min, max, gradientCSS) {
-    this.container = document.getElementById(containerId);
-    this.track = this.container.querySelector(".track");
-    this.range = this.container.querySelector(".range");
-    this.handle1 = this.container.querySelector(".handle1");
-    this.handle2 = this.container.querySelector(".handle2");
-
-    this.min = min;
-    this.max = max;
-    this.value1 = min;
-    this.value2 = max;
-
-    this.col1 = "#808080";
-    this.col2 = "#ff9b00";
-
-    this.isDragging = false;
-    this.activeHandle = null;
-    this.onChange = null;
-
-    this.lastHandle = null; // handle which was last touched
-
-    this.track.style.background = gradientCSS;
-    this.init();
-    this.updateDisplay();
-  }
-
-  init() {
-    this.handle1.addEventListener("mousedown", (e) =>
-      this.startDrag(e, "handle1")
-    );
-    this.handle2.addEventListener("mousedown", (e) =>
-      this.startDrag(e, "handle2")
-    );
-    document.addEventListener("mousemove", (e) => this.drag(e));
-    document.addEventListener("mouseup", () => this.endDrag());
-  }
-
-  startDrag(e, handleId) {
-    e.preventDefault();
-    this.isDragging = true;
-    this.activeHandle = handleId;
-    this.container.querySelector("." + handleId).classList.add("active");
-  }
-
-  drag(e) {
-    if (!this.isDragging || !this.activeHandle) return;
-
-    const rect = this.container.getBoundingClientRect();
-    let percent = (e.clientX - rect.left) / rect.width;
-    percent = Math.min(Math.max(percent, 0), 1);
-    const value = this.min + percent * (this.max - this.min);
-
-    if (this.activeHandle === "handle1") {
-      this.value1 = Math.min(value, this.value2); // stop overlap
-    } else {
-      this.value2 = Math.max(value, this.value1);
-    }
-
-    this.updateDisplay();
-    if (this.onChange) this.onChange(this.getValues());
-  }
-
-  endDrag() {
-    this.isDragging = false;
-    this.container
-      .querySelectorAll(".handle")
-      .forEach((h) => h.classList.remove("active"));
-  }
-
-  updateDisplay() {
-    const percent1 = (this.value1 - this.min) / (this.max - this.min);
-    const percent2 = (this.value2 - this.min) / (this.max - this.min);
-
-    this.handle1.style.left = `calc(${percent1 * 100}% - 6px)`;
-    this.handle2.style.left = `calc(${percent2 * 100}% - 6px)`;
-
-    this.range.style.left = `${percent1 * 100}%`;
-    this.range.style.width = `${(percent2 - percent1) * 100}%`;
-  }
-
-  getValues() {
-    return { start: this.value1, end: this.value2 };
-  }
-
-  setGradient(col1, col2) {
-    this.track.style.background = `linear-gradient(to right, ${col1}, ${col2})`;
-  }
-}
-
-// resize
 function resize() {
   const container = document.getElementById("render-container");
   camera.aspect = container.clientWidth / container.clientHeight;
@@ -1199,6 +433,43 @@ function centerCamera(object, scale = 1, offset = 0.167) {
   controls.target.copy(center);
   controls.update();
 }
+// disposes of old surfaces, gets new cut surfaces from slicer, and adds it to scene
+async function updateCutSurfaces() {
+  // new surfaces from slicer
+  const meshObj = await slicer.createCutSurfaces();
+
+  if (meshObj) {
+    // dispose of old surfaces
+    if (meshes["cutSurfaces"]) {
+      // remove from scene
+      scene.remove(meshes["cutSurfaces"].mesh);
+      // dispose of both geometries and materials
+      meshes["cutSurfaces"].mesh.traverse((child) => {
+        if (child.geometry) {
+          child.geometry.dispose();
+        }
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((mat) => mat.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+      // clear entry from meshes
+      delete meshes["cutSurfaces"];
+    }
+
+    // copy y rotation from shell mesh
+    if (meshes["shell"]?.mesh) {
+      meshObj.mesh.rotation.copy(meshes["shell"].mesh.rotation);
+    }
+    
+    // add to scene and meshes dictionary
+    scene.add(meshObj.mesh);
+    meshes["cutSurfaces"] = meshObj;
+  }
+}
 
 // animate
 function animate() {
@@ -1209,33 +480,8 @@ function animate() {
     }
   }
 
-  // // clear color, depth, & stencil buffers
-  // renderer.clear(true, true, true);
   renderer.render(scene, camera);
-
   controls.update();
-}
-
-async function load3DTexture(filename, size) {
-  const response = await fetch(filename);
-  if (!response.ok) {
-    throw new Error(`Failed to load texture: ${response.statusText}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const data = new Uint8Array(arrayBuffer);
-
-  const texture = new THREE.Data3DTexture(data, size, size, size);
-  texture.format = THREE.RGBAFormat;
-  texture.type = THREE.UnsignedByteType;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.wrapR = THREE.ClampToEdgeWrapping;
-  texture.needsUpdate = true;
-
-  return texture;
 }
 
 function main() {
