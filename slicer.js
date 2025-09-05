@@ -99,7 +99,7 @@ class Slicer {
       vertexShader = shaders.sliceVertex;
       fragmentShader = shaders.sliceFragment;
       // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way
-      side = THREE.DoubleSide;
+      side = THREE.FrontSide;
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -116,7 +116,7 @@ class Slicer {
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
       // debug
-      material.wireframe = true;
+    //   material.wireframe = true;
     }
 
     return material;
@@ -235,6 +235,7 @@ class Slicer {
     const vertices1 = [];
     const vertices2 = [];
 
+    let windingOrder;
     // for each point in the varying coordinate,
     for (const val of loop) {
       if (surfaceType === "hue") {
@@ -245,6 +246,8 @@ class Slicer {
 
         vertices1.push(this.HVC_to_XYZ(h, v, minC));
         vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
+
+        windingOrder = isMax;
       } else if (surfaceType === "value") {
         // hue=varying, value=fixed, chroma=clamped
         const h = val;
@@ -253,29 +256,28 @@ class Slicer {
 
         vertices1.push(this.HVC_to_XYZ(h, v, minC));
         vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
+
+        windingOrder = !isMax;
       } else if (surfaceType === "chroma") {
         // hue=varying, chroma=fixed, value=clamped
         const h = val;
         const c = fixed;
 
-        // todo: skip nulls here or in createGeomtry bc it might not be a continuous cylinder
         // find valid value range for this hue at this chroma
         const { validMinV, validMaxV } = this.valueRange(h, c, minV, maxV);
-        if (validMinV === null || validMaxV === null) {
-          console.log("ooga");
-        }
         const clampedMinV = clamp(minV, validMinV, validMaxV);
         const clampedMaxV = clamp(maxV, validMinV, validMaxV);
 
-        // bottom edge
-        vertices1.push(this.HVC_to_XYZ(h, clampedMinV, c));
-        // top edge
-        vertices2.push(this.HVC_to_XYZ(h, clampedMaxV, c));
+        // if one of the clamped values was null, push null so that createGeometry knows to skip the vertex
+        vertices1.push(clampedMinV === null ? null : this.HVC_to_XYZ(h, clampedMinV, c));
+        vertices2.push(clampedMaxV === null ? null : this.HVC_to_XYZ(h, clampedMaxV, c));
+
+        windingOrder = isMax;
       }
     }
 
     // todo: determine winding orders later
-    return createGeometry(vertices1, vertices2, true);
+    return createGeometry(vertices1, vertices2, windingOrder);
   }
 
   // finds minimum and maximum value that is inside the volume at this chroma
@@ -307,8 +309,8 @@ class Slicer {
     }
 
     //fallbacks
-    validMinV = validMinV ?? maxV;
-    validMaxV = validMaxV ?? minV;
+    // validMinV = validMinV ?? maxV;
+    // validMaxV = validMaxV ?? minV;
 
     if (validMinV === null || validMaxV === null) {
       console.log("find value range didnt find anything");
@@ -427,6 +429,9 @@ class Slicer {
 }
 
 function clamp(num, min, max) {
+  if (num === null || min === null || max === null) {
+    return null;
+  }
   return Math.min(Math.max(num, min), max);
 }
 
@@ -444,52 +449,43 @@ async function loadMaxChromaDict() {
   );
 }
 
-// creates geometry by connecting the 2 edges with quadrilateral strips
-// e.g. for hue plane, input is an edge of inner vertices and outer vertices, connect them with horizontal rectangles
-// (when edges converge to 1 points at top and bottom, just make a triangle degenerate)
-// for value plane, input is inner ring and outer ring, connect them with trapezoids
-// (if whole plane is included just means half of them are degenerate)
-// for chroma cylinders, connect upper and lower rings with vertical strips
 function createGeometry(edge1, edge2, reverseWinding = false) {
   if (edge1.length != edge2.length) {
     throw new Error("lengths r diff");
   }
-
+ 
   const positions = [];
   const indices = [];
-
-  // add all vertices to positions array, outer then inner strip
-  edge1.forEach((vertex) => {
-    positions.push(vertex.x, vertex.y, vertex.z || 0);
-  });
-  edge2.forEach((vertex) => {
-    positions.push(vertex.x, vertex.y, vertex.z || 0);
-  });
-
-  const edge1Count = edge1.length;
-  const edge2Count = edge2.length;
-  const edge1offset = 0;
-  const edge2offset = edge1Count;
-
-  // create quads between corresponding segments of outer and inner strips
-  const segmentCount = Math.min(edge1Count, edge2Count);
-
-  for (let i = 0; i < segmentCount - 1; i++) {
-    // quad vertices
-    const v00 = edge1offset + i;
-    const v01 = edge1offset + i + 1;
-    const v10 = edge2offset + i;
-    const v11 = edge2offset + i + 1;
-
-    if (
-      positions[v00].y === null ||
-      positions[v01].y === null ||
-      positions[v10].y === null ||
-      positions[v11].y === null
-    ) {
+  
+  // add all non-null vertices to positions array, keeping edges in sync
+  const vertexIndices1 = []; // map from original edge1 indices to position indices
+  const vertexIndices2 = []; // map from original edge2 indices to position indices
+  
+  for (let i = 0; i < edge1.length; i++) {
+    if (edge1[i] && edge2[i]) {
+      vertexIndices1[i] = positions.length / 3;
+      positions.push(edge1[i].x, edge1[i].y, edge1[i].z || 0);
+      
+      vertexIndices2[i] = positions.length / 3;
+      positions.push(edge2[i].x, edge2[i].y, edge2[i].z || 0);
+    } else {
+      // if at least one vertex is null - skip both
+      vertexIndices1[i] = null;
+      vertexIndices2[i] = null;
+    }
+  }
+  
+  for (let i = 0; i < edge1.length - 1; i++) {
+    const v00 = vertexIndices1[i];
+    const v01 = vertexIndices1[i + 1];
+    const v10 = vertexIndices2[i];
+    const v11 = vertexIndices2[i + 1];
+    
+    // skip if any vertex is null (mesh will be discontinuous)
+    if (v00 === null || v01 === null || v10 === null || v11 === null) {
       continue;
     }
-
+    
     // create two triangles for this quad
     if (reverseWinding) {
       indices.push(v00, v10, v01);
@@ -499,7 +495,7 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
       indices.push(v01, v11, v10);
     }
   }
-
+  
   //   console.log("First 3 outer:", edge1.slice(0, 3));
   //   console.log("First 3 inner:", edge2.slice(0, 3));
   //   console.log("Last 3 outer:" , edge1.slice(-3));
@@ -513,6 +509,7 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
+  
 }
 
 async function load3DTexture(filename, size) {
