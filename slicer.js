@@ -116,9 +116,9 @@ class Slicer {
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
       // debug
-    //   material.wireframe = true;
+      material.wireframe = true;
     }
-    
+
     return material;
   }
 
@@ -164,9 +164,11 @@ class Slicer {
 
     const materialPromise = this.getMaterial("cutSurface");
     return materialPromise.then((material) => {
-
       // generates valid values to loop over - minH, (grid points in between), ... maxH
-      const hueLoop = this.hueLoop(this.uniforms.hueMin.value, this.uniforms.hueMax.value);
+      const hueLoop = this.hueLoop(
+        this.uniforms.hueMin.value,
+        this.uniforms.hueMax.value
+      );
 
       // create geometry for each cut surface
       const surfaces = {
@@ -175,7 +177,7 @@ class Slicer {
         valueMinPlane: this.cutSurface("value", false, hueLoop),
         valueMaxPlane: this.cutSurface("value", true, hueLoop),
         chromaMinCyl: this.cutSurface("chroma", false, hueLoop),
-        chromaMaxCyl: this.cutSurface("chroma", true, hueLoop)
+        chromaMaxCyl: this.cutSurface("chroma", true, hueLoop),
       };
 
       // persist all surfaces to meshRefs
@@ -198,7 +200,6 @@ class Slicer {
       };
 
       return meshObj;
-      
     });
   }
 
@@ -216,7 +217,7 @@ class Slicer {
     } else if (surfaceType === "chroma") {
       fixed = isMax ? maxC : minC;
     }
-    
+
     // set the values we're gonna loop over - value for hue planes, hue for the other 2
     let loop;
     if (surfaceType === "hue") {
@@ -228,12 +229,12 @@ class Slicer {
     } else {
       loop = hueSequence;
     }
-    
+
     // smaller numbers = lower or inner edge loop
     // bigger numbers = upper or outer edge loop
     const vertices1 = [];
     const vertices2 = [];
-    
+
     // for each point in the varying coordinate,
     for (const val of loop) {
       if (surfaceType === "hue") {
@@ -244,16 +245,14 @@ class Slicer {
 
         vertices1.push(this.HVC_to_XYZ(h, v, minC));
         vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
-        
       } else if (surfaceType === "value") {
         // hue=varying, value=fixed, chroma=clamped
         const h = val;
         const v = fixed;
         const maxChroma = this.getMaxChroma(h, v);
-        
+
         vertices1.push(this.HVC_to_XYZ(h, v, minC));
         vertices2.push(this.HVC_to_XYZ(h, v, clamp(maxChroma, minC, maxC))); // outer edge clamped
-        
       } else if (surfaceType === "chroma") {
         // hue=varying, chroma=fixed, value=clamped
         const h = val;
@@ -262,66 +261,70 @@ class Slicer {
         // todo: skip nulls here or in createGeomtry bc it might not be a continuous cylinder
         // find valid value range for this hue at this chroma
         const { validMinV, validMaxV } = this.valueRange(h, c, minV, maxV);
+        if (validMinV === null || validMaxV === null) {
+          console.log("ooga");
+        }
         const clampedMinV = clamp(minV, validMinV, validMaxV);
         const clampedMaxV = clamp(maxV, validMinV, validMaxV);
-        
+
         // bottom edge
         vertices1.push(this.HVC_to_XYZ(h, clampedMinV, c));
         // top edge
         vertices2.push(this.HVC_to_XYZ(h, clampedMaxV, c));
       }
     }
-    
+
     // todo: determine winding orders later
     return createGeometry(vertices1, vertices2, true);
   }
 
-  // temp
   // finds minimum and maximum value that is inside the volume at this chroma
   // TODO: PROBLEM IS THIS ONLY CHECKS INTEGERS SO THERE ARE GAPS
   valueRange(h, c, minV, maxV) {
-    let left = Math.floor(minV);
-    let right = Math.ceil(maxV);
-    let validMinV = null;
-    let validMaxV = null;
-    
+    let left = Math.floor(minV), right = Math.ceil(maxV);
+    let validMinV = null, validMaxV = null;
+
     // two pointer approach
     while (left <= right && (validMinV === null || validMaxV === null)) {
-        // check left pointer if we haven't found validMinV yet
-        if (validMinV === null) {
-            const maxChromaLeft = this.getMaxChroma(h, left);
-            if (c <= maxChromaLeft) {
-                validMinV = left;
-            } else {
-                left++;
-            }
+      // check left pointer if we haven't found validMinV yet
+      if (validMinV === null) {
+        const maxChromaLeft = this.getMaxChroma(h, left);
+        if (c <= maxChromaLeft) {
+          validMinV = left;
+        } else {
+          left++;
         }
-        
-        // check right pointer if we haven't found validMaxV yet
-        if (validMaxV === null && left <= right) {
-            const maxChromaRight = this.getMaxChroma(h, right);
-            if (c <= maxChromaRight) {
-                validMaxV = right;
-            } else {
-                right--;
-            }
+      }
+      // check right pointer if we haven't found validMaxV yet
+      if (validMaxV === null && left <= right) {
+        const maxChromaRight = this.getMaxChroma(h, right);
+        if (c <= maxChromaRight) {
+          validMaxV = right;
+        } else {
+          right--;
         }
+      }
     }
 
     //fallbacks
     validMinV = validMinV ?? maxV;
     validMaxV = validMaxV ?? minV;
-    
+
+    if (validMinV === null || validMaxV === null) {
+      console.log("find value range didnt find anything");
+    }
+
     return {
       validMinV,
-      validMaxV
+      validMaxV,
     };
   }
-  
+
   hueLoop(minH, maxH) {
     // handle hue wraparound
-    minH = minH * 180 / Math.PI; maxH = maxH * 180 / Math.PI;
-    const hueSpan = maxH > minH ? maxH - minH : (360 - minH) + maxH;
+    minH = (minH * 180) / Math.PI;
+    maxH = (maxH * 180) / Math.PI;
+    const hueSpan = maxH > minH ? maxH - minH : 360 - minH + maxH;
     const numSteps = Math.floor(hueSpan / 9);
     const startH = Math.ceil(minH / 9) * 9;
 
@@ -376,13 +379,13 @@ class Slicer {
 
     // Handle hue wraparound at 0/360 boundary
     if (lowHue === 0) {
-        lowHue = 360;
-        highHue = 9;
+      lowHue = 360;
+      highHue = 9;
     } else if (highHue > 360) {
-        highHue = 9; // Wrap around to 9
+      highHue = 9; // Wrap around to 9
     } else if (lowHue === 360) {
-        lowHue = 360;
-        highHue = 9;
+      lowHue = 360;
+      highHue = 9;
     }
 
     // Find surrounding value levels (integers)
@@ -390,57 +393,56 @@ class Slicer {
     const highValue = Math.min(10, lowValue + 1);
 
     // Get the 4 corner values for bilinear interpolation
-    const c00 = this.maxChroma[lowHue ][lowValue ] || 0; // bottom-left
-    const c10 = this.maxChroma[highHue][lowValue ] || 0; // bottom-right
-    const c01 = this.maxChroma[lowHue ][highValue] || 0; // top-left
+    const c00 = this.maxChroma[lowHue][lowValue] || 0; // bottom-left
+    const c10 = this.maxChroma[highHue][lowValue] || 0; // bottom-right
+    const c01 = this.maxChroma[lowHue][highValue] || 0; // top-left
     const c11 = this.maxChroma[highHue][highValue] || 0; // top-right
-    
+
     // Calculate interpolation weights
     let hueWeight;
     if (lowHue === 360 && highHue === 9) {
-        // Special case for wraparound
-        if (hue <= 180) {
-            // targetHue is closer to 9 than 360
-            hueWeight = (hue + 360 - 360) / (9 + 360 - 360);
-        } else {
-            // targetHue is closer to 360
-            hueWeight = (hue - 360) / (9 + 360 - 360);
-        }
+      // Special case for wraparound
+      if (hue <= 180) {
+        // targetHue is closer to 9 than 360
+        hueWeight = (hue + 360 - 360) / (9 + 360 - 360);
+      } else {
+        // targetHue is closer to 360
+        hueWeight = (hue - 360) / (9 + 360 - 360);
+      }
     } else {
-        hueWeight = (hue - lowHue) / (highHue - lowHue);
+      hueWeight = (hue - lowHue) / (highHue - lowHue);
     }
-    
+
     const valueWeight = (value - lowValue) / (highValue - lowValue);
-    
+
     // bilinear interpolation
     const c0 = c00 * (1 - hueWeight) + c10 * hueWeight;
     const c1 = c01 * (1 - hueWeight) + c11 * hueWeight;
     const result = c0 * (1 - valueWeight) + c1 * valueWeight;
-    
+
     // console.log("hue, value, result: ", hue, value, result);
 
     return result;
   }
-
 }
 
 function clamp(num, min, max) {
-  return Math.min(Math.max(num, min), max)
+  return Math.min(Math.max(num, min), max);
 }
 
 async function loadMaxChromaDict() {
-    const response = await fetch("max_chroma.json");
-    const data = await response.json();
+  const response = await fetch("max_chroma.json");
+  const data = await response.json();
 
-    return Object.fromEntries(
-      Object.entries(data).map(([h, values]) => [
-        parseFloat(h),
-        Object.fromEntries(
-          Object.entries(values).map(([v, chroma]) => [parseFloat(v), chroma])
-        ),
-      ])
-    );
-  }
+  return Object.fromEntries(
+    Object.entries(data).map(([h, values]) => [
+      parseFloat(h),
+      Object.fromEntries(
+        Object.entries(values).map(([v, chroma]) => [parseFloat(v), chroma])
+      ),
+    ])
+  );
+}
 
 // creates geometry by connecting the 2 edges with quadrilateral strips
 // e.g. for hue plane, input is an edge of inner vertices and outer vertices, connect them with horizontal rectangles
@@ -452,34 +454,42 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
   if (edge1.length != edge2.length) {
     throw new Error("lengths r diff");
   }
-  
+
   const positions = [];
   const indices = [];
-  
+
   // add all vertices to positions array, outer then inner strip
-  edge1.forEach(vertex => {
+  edge1.forEach((vertex) => {
     positions.push(vertex.x, vertex.y, vertex.z || 0);
   });
-  edge2.forEach(vertex => {
+  edge2.forEach((vertex) => {
     positions.push(vertex.x, vertex.y, vertex.z || 0);
   });
-  
+
   const edge1Count = edge1.length;
   const edge2Count = edge2.length;
   const edge1offset = 0;
   const edge2offset = edge1Count;
-  
+
   // create quads between corresponding segments of outer and inner strips
   const segmentCount = Math.min(edge1Count, edge2Count);
-  
+
   for (let i = 0; i < segmentCount - 1; i++) {
-    
     // quad vertices
     const v00 = edge1offset + i;
     const v01 = edge1offset + i + 1;
     const v10 = edge2offset + i;
     const v11 = edge2offset + i + 1;
-    
+
+    if (
+      positions[v00].y === null ||
+      positions[v01].y === null ||
+      positions[v10].y === null ||
+      positions[v11].y === null
+    ) {
+      continue;
+    }
+
     // create two triangles for this quad
     if (reverseWinding) {
       indices.push(v00, v10, v01);
@@ -490,11 +500,11 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
     }
   }
 
-//   console.log("First 3 outer:", edge1.slice(0, 3));
-//   console.log("First 3 inner:", edge2.slice(0, 3));
-//   console.log("Last 3 outer:" , edge1.slice(-3));
-//   console.log("Last 3 inner:" , edge2.slice(-3));
-  
+  //   console.log("First 3 outer:", edge1.slice(0, 3));
+  //   console.log("First 3 inner:", edge2.slice(0, 3));
+  //   console.log("Last 3 outer:" , edge1.slice(-3));
+  //   console.log("Last 3 inner:" , edge2.slice(-3));
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",

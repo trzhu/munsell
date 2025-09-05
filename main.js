@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "OrbitControls";
-import { Slicer } from './slicer.js';
-import { CircularSlider, TwoHandleSlider } from './ui.js';
+import { Slicer } from "./slicer.js";
+import { CircularSlider, TwoHandleSlider } from "./ui.js";
 
 // globals
 let scene, camera, renderer, controls;
@@ -464,7 +464,7 @@ async function updateCutSurfaces() {
     if (meshes["shell"]?.mesh) {
       meshObj.mesh.rotation.copy(meshes["shell"].mesh.rotation);
     }
-    
+
     // add to scene and meshes dictionary
     scene.add(meshObj.mesh);
     meshes["cutSurfaces"] = meshObj;
