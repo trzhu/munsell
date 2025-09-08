@@ -32,9 +32,6 @@ class Slicer {
     // pointer for future cut surface material
     this.cutSurfaceMaterial = null;
 
-    // group of mesh geometries
-    // this.group = this.createCutSurfaces();
-
     // individual mesh references
     this.meshRefs = {
       hueMinPlane: null,
@@ -90,16 +87,12 @@ class Slicer {
     if (type === "points") {
       vertexShader = shaders.pointsVertex;
       fragmentShader = shaders.pointsFragment;
-      side = THREE.FrontSide;
     } else if (type === "mesh") {
       vertexShader = shaders.meshVertex;
       fragmentShader = shaders.meshFragment;
-      side = THREE.FrontSide;
     } else if (type === "cutSurface") {
       vertexShader = shaders.sliceVertex;
       fragmentShader = shaders.sliceFragment;
-      // TODO: will change this to frontside later, only front side is enough as long as the normals point the right way
-      side = THREE.FrontSide;
     } else {
       throw new Error(`Unsupported type: ${type}`);
     }
@@ -109,14 +102,13 @@ class Slicer {
       fragmentShader,
       uniforms: this.uniforms,
       transparent: true,
-      side: side,
     });
 
     // cache cut surface material bc it needs to be retrieved multiple times
     if (type === "cutSurface") {
       this.cutSurfaceMaterial = material;
       // debug
-    //   material.wireframe = true;
+      // material.wireframe = true;
     }
 
     return material;
@@ -276,12 +268,12 @@ class Slicer {
       }
     }
 
-    // todo: determine winding orders later
     return createGeometry(vertices1, vertices2, windingOrder);
   }
 
   // finds minimum and maximum value that is inside the volume at this chroma
   // TODO: PROBLEM IS THIS ONLY CHECKS INTEGERS SO THERE ARE GAPS
+  // TODO: WHY DOES IT ACT WEIRD FOR SOME HUE VALUES
   valueRange(h, c, minV, maxV) {
     let left = Math.floor(minV), right = Math.ceil(maxV);
     let validMinV = null, validMaxV = null;
@@ -308,14 +300,7 @@ class Slicer {
       }
     }
 
-    //fallbacks
-    // validMinV = validMinV ?? maxV;
-    // validMaxV = validMaxV ?? minV;
-
-    if (validMinV === null || validMaxV === null) {
-      console.log("find value range didnt find anything");
-    }
-
+    // if no valid min or max was found, intentionally return null
     return {
       validMinV,
       validMaxV,
@@ -379,15 +364,13 @@ class Slicer {
     let lowHue = Math.floor(hue / hStep) * hStep;
     let highHue = lowHue + hStep;
 
-    // Handle hue wraparound at 0/360 boundary
+    // handle hue wraparound at 0/360 boundary
+    lowHue = lowHue % 360;
+    highHue = highHue % 360;
     if (lowHue === 0) {
       lowHue = 360;
-      highHue = 9;
-    } else if (highHue > 360) {
-      highHue = 9; // Wrap around to 9
-    } else if (lowHue === 360) {
-      lowHue = 360;
-      highHue = 9;
+    } else if (highHue === 0) {
+      highHue = 360;
     }
 
     // Find surrounding value levels (integers)
