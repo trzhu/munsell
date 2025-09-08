@@ -7,8 +7,8 @@ from itertools import pairwise
 from collections import defaultdict
 from scipy.interpolate import LinearNDInterpolator
 
-# TODO compute a scaling factor that makes the Y axis perceptually uniform?
-Y_SCALE = 3
+# 3 was chosen arbitrarily
+Y_SCALE = 4
 # munsell used illuminant C for his work
 ILLUM_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
 
@@ -155,7 +155,6 @@ def to_3d_coordinates(df):
     return df
 
 # generate 3d mesh defined by the outermost vertices
-# TODO: THERES A LITTLE TEAR AT THE BOTTOM OF PURPLE WILL INVESTIGATE LATER
 def to_mesh(df_3d):
     # each entry of the dictionary is a df of all points with that Value
     # represents a horizontal "plate", which are stacked to form the space
@@ -224,6 +223,82 @@ def to_mesh(df_3d):
      
     return vertices, faces
 
+# instead of making each quad with 2 triangles,
+# first subdivide the horizontal edges
+# then draw tall skinny rectangles between them
+# (less artefacting from the nonplanar rects)
+def to_lerped_mesh(df):
+    df_new = exterior_lerp(df)
+    
+    vertices, faces = [], []
+    
+    return vertices, faces
+
+# extracts the outermost vertices
+def exterior_lerp(df, steps = 5):
+    # creates a df that contains only the exterior vertices
+    # (most chromatic vertex at each hue and value)
+    # and is sorted by value, and within each value, sorted by hue
+    exterior_df = (df
+        .groupby("Value")
+        .apply(lambda slice_df: 
+            slice_df[slice_df["Chroma"] > 0] if slice_df.name not in (0.0, 10.0) else slice_df
+        )
+        .reset_index(drop=True)
+        .sort_values("Chroma", ascending=False)
+        .drop_duplicates(["Value", "HueDeg"], keep="first")
+        .sort_values(["Value", "HueDeg"])
+        .reset_index(drop=True)
+    )
+    
+    exterior_df = exterior_df.dropna().reset_index(drop=True)
+    
+    df_augmented = interpolate_preprocess(df)
+    
+    points = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
+    
+    interp_L = LinearNDInterpolator(points, df_augmented["L*"])
+    interp_a = LinearNDInterpolator(points, df_augmented["a*"])
+    interp_b = LinearNDInterpolator(points, df_augmented["b*"])
+    
+    # todo: lerp between desired EXTERIOR vertices
+    # only lerp between neighbouring vertices (same value)
+    # only lerp if hue difference is 9
+    
+    # append to exterior_df
+    
+    return exterior_df
+
+# prepares df for interpolation by adding duplicate grays for each chroma
+# and duplicate hue slice at 360 (red)
+def interpolate_preprocess(df):
+    df_augmented = df.copy()
+    df_augmented["is_original"] = True
+    df_augmented["flagged_to_drop"] = False
+    
+    # gonna add some things to help with the interpolation, they all get flagged to be dropped later
+    augmented = []
+    
+    # duplicate grays so that each hue has its own gray
+    # helps with chroma interpolation
+    grays = df_augmented[df_augmented["Chroma"] == 0]
+    
+    for _, gray in grays.iterrows():
+        for hue in df_augmented["HueDeg"].unique():
+            g = gray.copy()
+            g["HueDeg"] = hue
+            g["flagged_to_drop"] = True
+            augmented.append(g)
+            
+    # duplicate the hue slice at 360 (red), flag it for deletion as well
+    hue_360_slice = df_augmented[df_augmented["HueDeg"] == 360].copy()
+    hue_360_slice["HueDeg"] = 0
+    hue_360_slice["flagged_to_drop"] = True
+    
+    df_augmented = pd.concat([df_augmented, pd.DataFrame(augmented), hue_360_slice], ignore_index=True)
+    
+    return df_augmented
+
 # new interpolate using LinearNDInterpolator
 def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
     """
@@ -242,31 +317,7 @@ def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
         20-30+ value steps
         30+ chroma steps
     """
-    
-    df = df.copy()
-    df["is_original"] = True
-    df["flagged_to_drop"] = False
-    
-    # gonna add some things to help with the interpolation, they all get flagged to be dropped later
-    augmented = []
-    
-    # duplicate grays so that each hue has its own gray
-    # helps with chroma interpolation
-    grays = df[df["Chroma"] == 0]
-    
-    for _, gray in grays.iterrows():
-        for hue in df["HueDeg"].unique():
-            g = gray.copy()
-            g["HueDeg"] = hue
-            g["flagged_to_drop"] = True
-            augmented.append(g)
-            
-    # duplicate the hue slice at 360 (red), flag it for deletion as well
-    hue_360_slice = df[df["HueDeg"] == 360].copy()
-    hue_360_slice["HueDeg"] = 0
-    hue_360_slice["flagged_to_drop"] = True
-    
-    df_augmented = pd.concat([df, pd.DataFrame(augmented), hue_360_slice], ignore_index=True)
+    df_augmented = interpolate_preprocess(df)
     
     points = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
     
@@ -365,6 +416,7 @@ def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
     
     return df_result
 
+
 # put all vertices in a point cloud
 def to_pointcloud(df_3d):
     vertices = []
@@ -424,10 +476,6 @@ def write_json(dictionary):
     # convert from default dict to regular dict
     d = dict(dictionary)
 
-<<<<<<< HEAD
-=======
-    # Option 1: Nested object structure (easiest to read in JS)
->>>>>>> 032c8931d0c92dad82fcc64a79f95159fac8341c
     nested_dict = {}
     for (hue, value), chroma in d.items():
         if hue not in nested_dict:
@@ -456,23 +504,42 @@ def original():
     # df_processed.to_csv("munsell_parsed.csv", index=False)
     # print("saved to munsell_parsed.csv")
     
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
-    
-    df_3d = to_3d_coordinates(df_processed)
-    df_3d.to_csv("munsell_3d.csv", index=False)
-    print("saved to munsell_3d.csv")
-    
-    # # create a point cloud
-    # vertices = to_pointcloud(df_3d)
-    # write_ply(vertices, [], "munsell_pointcloud.ply")
+    df_3d = pd.read_csv("munsell_3d_original.csv", index_col=False)
+    # create a point cloud
+    vertices = to_pointcloud(df_3d)
+    write_ply(vertices, [], "munsell_pointcloud.ply")
     
     # create a "shell" mesh
     outer_vertices, faces = to_mesh(df_3d)
+    write_ply(outer_vertices, faces, "munsell_mesh_original.ply")
+
+# write interpoltaed data to a mesh to see how it looks
+# (it looks like shit im not using that)
+def to_dense_mesh_test():
+    df_interpolated = pd.read_csv("munsell_interpolated.csv", index_col=False)
+    df_3d = to_3d_coordinates(df_interpolated)
+    
+    outer_vertices, faces = to_mesh(df_3d)
+    write_ply(outer_vertices, faces, "munsell_mesh_dense_test.ply")
+    
+# dense point cloud
+def to_dense_cloud():
+    return
+
+# trying something new
+def smoother_mesh():
+    df = pd.read_csv("munsell_parsed.csv", index_col=False)
+    
+    df_exterior_lerp = exterior_lerp(df)
+    df_3d = to_3d_coordinates(df_exterior_lerp)
+    
+    outer_vertices, faces = to_lerped_mesh(df_3d)
     write_ply(outer_vertices, faces, "munsell_mesh.ply")
+    
 
 def main():
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
-    df_interpolated = interpolate(df_processed)
+    # df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    # df_interpolated = interpolate(df_processed)
     # df_interpolated.to_csv("munsell_interpolated.csv", index=False)
     # print("saved to munsell_interpolated.csv")
     
@@ -484,6 +551,11 @@ def main():
     # create a dense point cloud
     # vertices = to_pointcloud(df_3d)
     # write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
+    
+    df = pd.read_csv("munsell_parsed.csv", index_col=False)
+    
+    df_exterior_lerp = exterior_lerp(df)
+    
     
     print(":)")
     
