@@ -313,12 +313,12 @@ class Slicer {
     maxH = (maxH * 180) / Math.PI;
     const hueSpan = maxH > minH ? maxH - minH : 360 - minH + maxH;
     const numSteps = Math.floor(hueSpan / 9);
-    const startH = Math.ceil(minH / 9) * 9;
+    const startH = Math.floor(minH / 9) * 9 + 9;
 
     const sequence = [minH];
     // for every h from minH to maxH in increments of 9 (the grid points)
     for (let i = 1; i < numSteps; i++) {
-      sequence.push(startH + i * 9) % 360;
+      sequence.push((startH + i * 9) % 360);
     }
     sequence.push(maxH);
 
