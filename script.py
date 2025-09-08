@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import re, urllib.request
 import json
+import math
 from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
 from collections import defaultdict
@@ -62,6 +63,22 @@ def Lab_to_sRGB(lab):
     
     # because is_clipped is an np array
     # return sRGB_clipped, is_clipped.item()
+
+def hvc_to_xyz(h, v, c):
+    hue_radians = math.radians(h)
+    x = c * math.cos(hue_radians)
+    y = Y_SCALE * v
+    z = c * math.sin(hue_radians)
+    return x, y, z
+
+def xyz_to_hvc(x, y, z):
+    h = math.degrees(math.atan2(z, x))
+    v = y / Y_SCALE
+    c = math.sqrt(x * x + z * z)
+
+    if h < 0:
+        h += 360
+    return h, v, c
 
 # adds Lab and RGB conversions to the dataframe
 # also adds grayscale points to each value plate by avging luminosity
@@ -155,85 +172,19 @@ def to_3d_coordinates(df):
     return df
 
 # generate 3d mesh defined by the outermost vertices
-def to_mesh(df_3d):
-    # each entry of the dictionary is a df of all points with that Value
-    # represents a horizontal "plate", which are stacked to form the space
-    slices = {}
-    for v, slice_df in df_3d.groupby("Value"):
-        
-        # remove grayscale (except black and white)
-        if v not in (0.0, 10.0):
-            slice_df = slice_df[slice_df["Chroma"] > 0]
+# from a df that contains all vertices
+# prob gonna depracate this when i clean everything up at the end
+def to_mesh_old(df_3d):
+    df_exterior = filter_exterior(df_3d)
+    return to_mesh(df_exterior)
 
-        # skip slices that were interpolated to only have a singular grayscale point
-        if slice_df.empty:
-            continue
-        
-        # sort each slice by hue
-        # # only keep the highest chroma (outermost) vertex of each slice
-        slice_df = slice_df.sort_values("Chroma", ascending=False).drop_duplicates("HueDeg", keep="first")
-        slice_df = slice_df.sort_values("HueDeg")
-        slices[v] = slice_df
-    
-    # originally 1-9 for munsell data, 0-10 including white and black
-    values = sorted(slices.keys())
-    
+# creates a mesh from a df that only has exterior vertices
+def to_mesh(exterior_df):
     vertices, faces = [], []
     index_map = {}
     global_index = 0
     
-    # add all vertices to global vertices list
-    for v in values:
-        slice_df = slices[v]
-        idx_list = []
-        for _, row in slice_df.iterrows():
-            vertices.append((row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"], 
-                             row["R"], row["G"], row["B"], 
-                             row["HueDeg"], row["Value"], row["Chroma"],
-                             row["is_clipped"]))
-            idx_list.append(global_index)
-            global_index += 1
-        # and index them (they will automatically go in by hue order)
-        index_map[v] = idx_list
-
-    # build faces between adjacent slices
-    for v1, v2 in pairwise(values):
-        idx1 = index_map[v1]
-        idx2 = index_map[v2]
-        
-        # bottom cap (black)
-        if len(idx1) == 1:
-            center = idx1[0]
-            for i in range(len(idx2)):
-                i_next = (i + 1) % len(idx2)
-                faces.append((center, idx2[i], idx2[i_next]))
-        # top cap (white)
-        elif len(idx2) == 1:
-            center = idx2[0]
-            for i in range(len(idx1)):
-                i_next = (i + 1) % len(idx1)
-                faces.append((center, idx1[i_next], idx1[i]))
-        else: 
-            N = min(len(idx1), len(idx2))
-            for i in range(N):
-                i_next = (i + 1) % N
-                # form two triangles (that make 1 quad)
-                faces.append((idx1[i], idx2[i], idx2[i_next]))
-                faces.append((idx1[i], idx2[i_next], idx1[i_next]))
-     
-    return vertices, faces
-
-# instead of making each quad with 2 triangles,
-# first subdivide the horizontal edges
-# then draw tall skinny rectangles between them
-# (less artefacting from the nonplanar rects)
-def to_lerped_mesh(df):
-    exterior_df = exterior_lerp(df)
-    
-    vertices, faces = [], []
-    index_map = {}
-    global_index = 0
-    
+    # each slice represents a horizontal "plate" slice
     for value, slice_df in exterior_df.groupby("Value"):
         slice_df = slice_df.sort_values("HueDeg")
         idx_list = []
@@ -250,10 +201,10 @@ def to_lerped_mesh(df):
         
         index_map[value] = idx_list
     
-    # get values
+    # get values - vertical axis numbers
     values = sorted(index_map.keys())
     
-    # build faces between adjacent slices
+    # build faces between (vertically) adjacent slices
     for v1, v2 in pairwise(values):
         idx1 = index_map[v1]
         idx2 = index_map[v2]
@@ -274,6 +225,7 @@ def to_lerped_mesh(df):
                 
         else:
             # regular slice, create quads
+            # TODO: maybe adapt which way the quad cuts based on the curvature of the surface?
             N = min(len(idx1), len(idx2))
             for i in range(N):
                 i_next = (i + 1) % N
@@ -283,14 +235,15 @@ def to_lerped_mesh(df):
     
     return vertices, faces
 
-# extracts the outermost vertices
-def exterior_lerp(df, steps = 10):
-    # creates a df that contains only the exterior vertices
-    # (most chromatic vertex at each hue and value)
-    # and is sorted by value, and within each value, sorted by hue
+# creates a df that contains only the exterior vertices
+# (most chromatic vertex at each hue and value)
+# and is sorted by value, and within each value, sorted by hue
+def filter_exterior(df):
+    df_3d = to_3d_coordinates(df)
+    
     exterior_rows = []
     
-    for value, slice_df in df.groupby("Value"):
+    for value, slice_df in df_3d.groupby("Value"):
         # keep white and black no matter what
         if value in (0.0, 10.0):
             filtered_slice = slice_df
@@ -309,79 +262,65 @@ def exterior_lerp(df, steps = 10):
     
     # combine and re-sort
     exterior_df = pd.concat(exterior_rows, ignore_index=True)
-    # exterior_df = exterior_df.sort_values(["Value", "HueDeg"]).reset_index(drop=True)
-    
-    df_augmented = interpolate_preprocess(df)
-    
-    points = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
-    
-    interp_L = LinearNDInterpolator(points, df_augmented["L*"])
-    interp_a = LinearNDInterpolator(points, df_augmented["a*"])
-    interp_b = LinearNDInterpolator(points, df_augmented["b*"])
-    
-    # lerp between neighbouring exterior vertices
-    interpolated_rows = []
-    
-    for value, value_group in exterior_df.groupby("Value"):
-        value_group = value_group.sort_values("HueDeg").reset_index(drop=True)
-        
-        for i in range(len(value_group)):
-            next_i = (i + 1) % len(value_group)
-            
-            hue1 = value_group.iloc[i]["HueDeg"]
-            hue2 = value_group.iloc[next_i]["HueDeg"]
-            
-            # handle wraparound for hue difference calculation
-            hue_diff = abs(hue2 - hue1)
-            if hue_diff > 180:
-                hue_diff = 360 - hue_diff
-            
-            # only interpolate neghbours (when hue difference is exactly 9)
-            if hue_diff == 9:
-                chroma1 = value_group.iloc[i]["Chroma"]
-                chroma2 = value_group.iloc[next_i]["Chroma"]
-                
-                if abs(hue2 - hue1) > 180:
-                    if hue2 > hue1:
-                        hue1 += 360
-                    else:
-                        hue2 += 360
-                
-                # create interpolated points
-                for step in range(1, steps):
-                    t = step / steps
-                    
-                    interp_hue = (1 - t) * hue1 + t * hue2
-                    interp_chroma = (1 - t) * chroma1 + t * chroma2
-                    
-                    interp_hue = interp_hue % 360
-                    
-                    # interpolate lab
-                    query_point = np.array([[interp_hue, value, interp_chroma]])
-                    
-                    new_L = interp_L(query_point)[0]
-                    new_a = interp_a(query_point)[0]
-                    new_b = interp_b(query_point)[0]
-                    
-                    if not (np.isnan(new_L) or np.isnan(new_a) or np.isnan(new_b)):
-                        new_row = value_group.iloc[i].copy()
-                        new_row["HueDeg"] = interp_hue
-                        new_row["Value"] = value
-                        new_row["Chroma"] = interp_chroma
-                        new_row["L*"] = new_L
-                        new_row["a*"] = new_a
-                        new_row["b*"] = new_b
-                        new_row["is_original"] = False
-                        
-                        interpolated_rows.append(new_row)
-
-    interpolated_df = pd.DataFrame(interpolated_rows)
-    exterior_df = pd.concat([exterior_df, interpolated_df], ignore_index=True)
-    
-    # sort again
-    exterior_df = exterior_df.sort_values(["Value", "HueDeg"]).reset_index(drop=True)
     
     return exterior_df
+
+# creates a mesh by subdividing and bilerping each quad
+# into 2^(levels) quads
+def to_bilerped_mesh(df, subdivision_levels=2):
+
+    df_augmented = interpolate_preprocess(df)
+    df_exterior = filter_exterior(df)
+
+    grid = {}
+    for _, row in df_exterior.iterrows():
+        hue = int(row["HueDeg"])
+        value = int(row["Value"])
+        grid[(hue, value)] = row  
+    all_points = []
+
+    vertices = []
+    faces = []
+
+    def lerp(corner1, corner2):
+        # return row with:
+        # midpoint of X_3D, Y_3D, Z_3D values 
+        pass
+
+    def bilerp(v00, v10, v01, v11, level):
+        for corner in [v00, v10, v01, v11]:
+            # add new points
+            if corner not in all_points:
+                all_points.append(corner)
+        
+        if level > 0:
+            # midpoints
+            left = lerp(v00, v01)
+            right = lerp(v10, v11)
+            bottom = lerp(v00, v10)
+            top = lerp(v01, v11)
+            
+            center = lerp(left, right)
+            
+            # recurse on 4 sub-quads
+            bilerp(v00, bottom, left, center, level - 1)
+            bilerp(bottom, v10, center, right, level - 1)
+            bilerp(center, right, v11, top, level - 1)
+            bilerp(left, center, top, v01, level - 1)
+
+    # todo
+    # for h1, h2 in pairwise(hues):
+    #     for v1, v2 in pairwise(vals):
+    #         bilerp()
+
+    df = pd.DataFrame(all_points)
+    
+    # todo: 
+    # based on x_3d, y_3d, z_3d, in df, reverse back to HVC
+    # using xyz_to_hvc()
+    # based on HVC, lerp lab using linearNDinterpolator
+    
+    return df
 
 # prepares df for interpolation by adding duplicate grays for each chroma
 # and duplicate hue slice at 360 (red)
@@ -624,20 +563,12 @@ def original():
     write_ply(vertices, [], "munsell_pointcloud.ply")
     
     # create a "shell" mesh
-    outer_vertices, faces = to_mesh(df_3d)
+    outer_vertices, faces = to_mesh_old(df_3d)
     write_ply(outer_vertices, faces, "munsell_mesh_original.ply")
-
-# write interpoltaed data to a mesh to see how it looks
-# (it looks like shit im not using that)
-def to_dense_mesh_test():
-    df_interpolated = pd.read_csv("munsell_interpolated.csv", index_col=False)
-    df_3d = to_3d_coordinates(df_interpolated)
-    
-    outer_vertices, faces = to_mesh(df_3d)
-    write_ply(outer_vertices, faces, "munsell_mesh_dense_test.ply")
     
 # dense point cloud
 def to_dense_cloud():
+    # oops i forgot but I was gonna make point cloud interpolated here
     return
 
 # trying something new
