@@ -8,7 +8,7 @@ from collections import defaultdict
 from scipy.interpolate import LinearNDInterpolator
 
 # 3 was chosen arbitrarily
-Y_SCALE = 4
+Y_SCALE = 3
 # munsell used illuminant C for his work
 ILLUM_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
 
@@ -228,30 +228,88 @@ def to_mesh(df_3d):
 # then draw tall skinny rectangles between them
 # (less artefacting from the nonplanar rects)
 def to_lerped_mesh(df):
-    df_new = exterior_lerp(df)
+    exterior_df = exterior_lerp(df)
     
     vertices, faces = [], []
+    index_map = {}
+    global_index = 0
+    
+    for value, slice_df in exterior_df.groupby("Value"):
+        slice_df = slice_df.sort_values("HueDeg")
+        idx_list = []
+        
+        for _, row in slice_df.iterrows():
+            vertices.append((
+                row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"],
+                row["R"], row["G"], row["B"],
+                row["HueDeg"], row["Value"], row["Chroma"],
+                row["is_clipped"]
+            ))
+            idx_list.append(global_index)
+            global_index += 1
+        
+        index_map[value] = idx_list
+    
+    # get values
+    values = sorted(index_map.keys())
+    
+    # build faces between adjacent slices
+    for v1, v2 in pairwise(values):
+        idx1 = index_map[v1]
+        idx2 = index_map[v2]
+        
+        # bottom cap (black)
+        if len(idx1) == 1:
+            center = idx1[0]
+            for i in range(len(idx2)):
+                i_next = (i + 1) % len(idx2)
+                faces.append((center, idx2[i], idx2[i_next]))
+                
+        # top cap (white)
+        elif len(idx2) == 1:
+            center = idx2[0]
+            for i in range(len(idx1)):
+                i_next = (i + 1) % len(idx1)
+                faces.append((center, idx1[i_next], idx1[i]))
+                
+        else:
+            # regular slice, create quads
+            N = min(len(idx1), len(idx2))
+            for i in range(N):
+                i_next = (i + 1) % N
+                # form two triangles (that make 1 quad)
+                faces.append((idx1[i], idx2[i], idx2[i_next]))
+                faces.append((idx1[i], idx2[i_next], idx1[i_next]))
     
     return vertices, faces
 
 # extracts the outermost vertices
-def exterior_lerp(df, steps = 5):
+def exterior_lerp(df, steps = 10):
     # creates a df that contains only the exterior vertices
     # (most chromatic vertex at each hue and value)
     # and is sorted by value, and within each value, sorted by hue
-    exterior_df = (df
-        .groupby("Value")
-        .apply(lambda slice_df: 
-            slice_df[slice_df["Chroma"] > 0] if slice_df.name not in (0.0, 10.0) else slice_df
-        )
-        .reset_index(drop=True)
-        .sort_values("Chroma", ascending=False)
-        .drop_duplicates(["Value", "HueDeg"], keep="first")
-        .sort_values(["Value", "HueDeg"])
-        .reset_index(drop=True)
-    )
+    exterior_rows = []
     
-    exterior_df = exterior_df.dropna().reset_index(drop=True)
+    for value, slice_df in df.groupby("Value"):
+        # keep white and black no matter what
+        if value in (0.0, 10.0):
+            filtered_slice = slice_df
+        # otherwise drop grayscales 
+        # (prevents issues due to "dummy" 0 HueDeg grayscale vertices)
+        else:
+            filtered_slice = slice_df[slice_df["Chroma"] > 0]
+            
+        if not filtered_slice.empty:
+            # keep highest chroma per hue
+            filtered_slice = (filtered_slice
+                .sort_values("Chroma", ascending=False)
+                .drop_duplicates("HueDeg", keep="first")
+            )
+            exterior_rows.append(filtered_slice)
+    
+    # combine and re-sort
+    exterior_df = pd.concat(exterior_rows, ignore_index=True)
+    # exterior_df = exterior_df.sort_values(["Value", "HueDeg"]).reset_index(drop=True)
     
     df_augmented = interpolate_preprocess(df)
     
@@ -261,11 +319,67 @@ def exterior_lerp(df, steps = 5):
     interp_a = LinearNDInterpolator(points, df_augmented["a*"])
     interp_b = LinearNDInterpolator(points, df_augmented["b*"])
     
-    # todo: lerp between desired EXTERIOR vertices
-    # only lerp between neighbouring vertices (same value)
-    # only lerp if hue difference is 9
+    # lerp between neighbouring exterior vertices
+    interpolated_rows = []
     
-    # append to exterior_df
+    for value, value_group in exterior_df.groupby("Value"):
+        value_group = value_group.sort_values("HueDeg").reset_index(drop=True)
+        
+        for i in range(len(value_group)):
+            next_i = (i + 1) % len(value_group)
+            
+            hue1 = value_group.iloc[i]["HueDeg"]
+            hue2 = value_group.iloc[next_i]["HueDeg"]
+            
+            # handle wraparound for hue difference calculation
+            hue_diff = abs(hue2 - hue1)
+            if hue_diff > 180:
+                hue_diff = 360 - hue_diff
+            
+            # only interpolate neghbours (when hue difference is exactly 9)
+            if hue_diff == 9:
+                chroma1 = value_group.iloc[i]["Chroma"]
+                chroma2 = value_group.iloc[next_i]["Chroma"]
+                
+                if abs(hue2 - hue1) > 180:
+                    if hue2 > hue1:
+                        hue1 += 360
+                    else:
+                        hue2 += 360
+                
+                # create interpolated points
+                for step in range(1, steps):
+                    t = step / steps
+                    
+                    interp_hue = (1 - t) * hue1 + t * hue2
+                    interp_chroma = (1 - t) * chroma1 + t * chroma2
+                    
+                    interp_hue = interp_hue % 360
+                    
+                    # interpolate lab
+                    query_point = np.array([[interp_hue, value, interp_chroma]])
+                    
+                    new_L = interp_L(query_point)[0]
+                    new_a = interp_a(query_point)[0]
+                    new_b = interp_b(query_point)[0]
+                    
+                    if not (np.isnan(new_L) or np.isnan(new_a) or np.isnan(new_b)):
+                        new_row = value_group.iloc[i].copy()
+                        new_row["HueDeg"] = interp_hue
+                        new_row["Value"] = value
+                        new_row["Chroma"] = interp_chroma
+                        new_row["L*"] = new_L
+                        new_row["a*"] = new_a
+                        new_row["b*"] = new_b
+                        new_row["is_original"] = False
+                        
+                        interpolated_rows.append(new_row)
+
+    interpolated_df = pd.DataFrame(interpolated_rows)
+    exterior_df = pd.concat([exterior_df, interpolated_df], ignore_index=True)
+    
+    # sort again
+    exterior_df = exterior_df.sort_values(["Value", "HueDeg"]).reset_index(drop=True)
     
     return exterior_df
 
@@ -552,9 +666,7 @@ def main():
     # vertices = to_pointcloud(df_3d)
     # write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
     
-    df = pd.read_csv("munsell_parsed.csv", index_col=False)
-    
-    df_exterior_lerp = exterior_lerp(df)
+    smoother_mesh()
     
     
     print(":)")
