@@ -58,11 +58,8 @@ def Lab_to_sRGB(lab):
     # Handle both single point and array cases
     if is_clipped.shape == ():  # Single point
         return sRGB_clipped, is_clipped.item()
-    else:  # Array of points
+    else:
         return sRGB_clipped, is_clipped
-    
-    # because is_clipped is an np array
-    # return sRGB_clipped, is_clipped.item()
 
 def hvc_to_xyz(h, v, c):
     hue_radians = math.radians(h)
@@ -268,9 +265,12 @@ def filter_exterior(df):
 # creates a mesh by subdividing and bilerping each quad
 # into 2^(levels) quads
 def to_bilerped_mesh(df, subdivision_levels=2):
-
-    df_augmented = interpolate_preprocess(df)
-    df_exterior = filter_exterior(df)
+    
+    df["is_original"] = True
+    df_3d = to_3d_coordinates(df)
+    
+    df_augmented = interpolate_preprocess(df_3d)
+    df_exterior = filter_exterior(df_3d)
 
     grid = {}
     for _, row in df_exterior.iterrows():
@@ -279,19 +279,18 @@ def to_bilerped_mesh(df, subdivision_levels=2):
         grid[(hue, value)] = row  
     all_points = []
 
-    vertices = []
-    faces = []
-
     def lerp(corner1, corner2):
-        # return row with:
-        # midpoint of X_3D, Y_3D, Z_3D values 
-        pass
+        return pd.Series({
+            "X_3D": (corner1["X_3D"] + corner2["X_3D"]) / 2,
+            "Y_3D": (corner1["Y_3D"] + corner2["Y_3D"]) / 2,
+            "Z_3D": (corner1["Z_3D"] + corner2["Z_3D"]) / 2,
+            "is_original": False,
+            "is_interpolated": True # flag for post processing
+            })
 
     def bilerp(v00, v10, v01, v11, level):
-        for corner in [v00, v10, v01, v11]:
-            # add new points
-            if corner not in all_points:
-                all_points.append(corner)
+        # just add eerything lmao gonna have to drop duplicates later
+        all_points.extend([v00, v10, v01, v11])
         
         if level > 0:
             # midpoints
@@ -307,20 +306,52 @@ def to_bilerped_mesh(df, subdivision_levels=2):
             bilerp(bottom, v10, center, right, level - 1)
             bilerp(center, right, v11, top, level - 1)
             bilerp(left, center, top, v01, level - 1)
-
-    # todo
-    # for h1, h2 in pairwise(hues):
-    #     for v1, v2 in pairwise(vals):
-    #         bilerp()
-
-    df = pd.DataFrame(all_points)
+        
+    # process grid cells
+    hues = sorted(set(h for h, v in grid.keys()))
+    values = sorted(set(v for h, v in grid.keys()))
     
-    # todo: 
-    # based on x_3d, y_3d, z_3d, in df, reverse back to HVC
-    # using xyz_to_hvc()
-    # based on HVC, lerp lab using linearNDinterpolator
+    for h1, h2 in pairwise(hues):
+        for v1, v2 in pairwise(values):
+            if all((h, v) in grid for h in [h1, h2] for v in [v1, v2]):
+                bilerp(grid[(h1,v1)], grid[(h2,v1)], 
+                       grid[(h1,v2)], grid[(h2,v2)], subdivision_levels) 
+
+    # process new interpolated points separately
+    df_new = pd.DataFrame(all_points)
+    df_new = df_new[df_new.get('is_interpolated', False).fillna(False)]  # only interpolated points
+    df_new =df_new.drop_duplicates(subset=['X_3D', 'Y_3D', 'Z_3D'])
     
-    return df
+    if not df_new.empty:
+        # convert xyz back to hvc
+        hvc = df_new[['X_3D', 'Y_3D', 'Z_3D']].apply(
+            lambda row: xyz_to_hvc(row['X_3D'], row['Y_3D'], row['Z_3D']), 
+            axis=1, result_type='expand'
+        )
+        df_new[['HueDeg', 'Value', 'Chroma']] = hvc
+        
+        # using interpolators from df_augmented, determine Lab values based off XYZ values
+        points_hvc = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
+        interp_L = LinearNDInterpolator(points_hvc, df_augmented["L*"])
+        interp_a = LinearNDInterpolator(points_hvc, df_augmented["a*"])
+        interp_b = LinearNDInterpolator(points_hvc, df_augmented["b*"])
+        
+        query_points = df_new[["HueDeg", "Value", "Chroma"]].to_numpy()
+        df_new["L*"] = interp_L(query_points)
+        df_new["a*"] = interp_a(query_points)
+        df_new["b*"] = interp_b(query_points)
+        
+    # TODO: investigate why not every point got Lab values filled in??
+    
+    # drop duplicates will keep original data because it was added first
+    df_exterior = pd.concat([df_exterior, df_new], ignore_index=True)
+    df_exterior = df_exterior.drop_duplicates(subset=['X_3D', 'Y_3D', 'Z_3D'])
+    
+    # TODO: convert with Lab to sRGB
+   
+    df_exterior.to_csv("temp_subdivided_df.csv", index=False)
+   
+    return df_exterior
 
 # prepares df for interpolation by adding duplicate grays for each chroma
 # and duplicate hue slice at 360 (red)
@@ -474,8 +505,6 @@ def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
 def to_pointcloud(df_3d):
     vertices = []
     for _, row in df_3d.iterrows():
-        # TODO: add additional vertex metadata for HueDeg, Chroma, and Value
-        # and isClipped
         x, y, z = row["X_3D"], Y_SCALE * row["Y_3D"], row["Z_3D"]
         r, g, b = row["R"], row["G"], row["B"]
         h, v, c, is_clipped = row["HueDeg"], row["Value"], row["Chroma"], row["is_clipped"]
@@ -550,12 +579,12 @@ def to_pointcloud_original():
 
 # point cloud and mesh with only the original dataset
 def original():
-    # input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
-    # df_raw = load_munsell_dat(input_url)
+    input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
+    df_raw = load_munsell_dat(input_url)
     
-    # df_processed = process(df_raw)
-    # df_processed.to_csv("munsell_parsed.csv", index=False)
-    # print("saved to munsell_parsed.csv")
+    df_processed = process(df_raw)
+    df_processed.to_csv("munsell_parsed.csv", index=False)
+    print("saved to munsell_parsed.csv")
     
     df_3d = pd.read_csv("munsell_3d_original.csv", index_col=False)
     # create a point cloud
@@ -569,17 +598,19 @@ def original():
 # dense point cloud
 def to_dense_cloud():
     # oops i forgot but I was gonna make point cloud interpolated here
+    # create a dense point cloud
+    # vertices = to_pointcloud(df_3d)
+    # write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
     return
 
 # trying something new
 def smoother_mesh():
     df = pd.read_csv("munsell_parsed.csv", index_col=False)
     
-    df_exterior_lerp = exterior_lerp(df)
-    df_3d = to_3d_coordinates(df_exterior_lerp)
+    df_subdivided = to_bilerped_mesh(df, 2)
+    vertices, points = to_mesh(df_subdivided)
+    write_ply(vertices, points, "temp_mesh.ply")
     
-    outer_vertices, faces = to_lerped_mesh(df_3d)
-    write_ply(outer_vertices, faces, "munsell_mesh.ply")
     
 
 def main():
@@ -592,10 +623,6 @@ def main():
     # df_3d = to_3d_coordinates(df_interpolated)
     # df_3d.to_csv("munsell_3d.csv", index=False)
     # print("saved to munsell_3d.csv")
-    
-    # create a dense point cloud
-    # vertices = to_pointcloud(df_3d)
-    # write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
     
     smoother_mesh()
     
