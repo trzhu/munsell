@@ -71,8 +71,8 @@ class Slicer {
   }
 
   async loadTextures() {
-    const texture3D = await load3DTexture("./texture3d_64.bin", 64);
-    this.uniforms.interiorTexture.value = texture3D;
+    // const texture3D = await load3DTexture("./texture3d_64.bin", 64);
+    // this.uniforms.interiorTexture.value = texture3D;
   }
 
   async getMaterial(type) {
@@ -479,11 +479,6 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
     }
   }
   
-  //   console.log("First 3 outer:", edge1.slice(0, 3));
-  //   console.log("First 3 inner:", edge2.slice(0, 3));
-  //   console.log("Last 3 outer:" , edge1.slice(-3));
-  //   console.log("Last 3 inner:" , edge2.slice(-3));
-
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
