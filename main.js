@@ -14,24 +14,16 @@ let isPaused = false;
 const meshes = {};
 
 const sceneConfigs = {
-  default: {
-    name: "Volume",
-    // visible: ["shell"],
-    visible: ["shell", "cutSurfaces"],
-    hidden: ["pointcloud_interpolated", "pointcloud_original"],
+  interpolated: {
+    name: "Points (interpolated)",
+    visible: ["pointcloud_interpolated"],
+    hidden: ["pointcloud_original", "shell", "cutSurfaces"],
   },
   pointCloud: {
-    name: "Points",
+    name: "Points (original Munsell dataset)",
     visible: ["pointcloud_original"],
-    hidden: ["shell", "pointcloud_interpolated"],
-  },
-  debug: {
-    name: "Debug",
-    visible: ["cutSurfaces"],
-    // visible: ["shell", "cutSurfaces"],
-    // visible: ["pointcloud_interpolated"],
-    hidden: ["shell", "pointcloud_original"],
-  },
+    hidden: ["shell", "pointcloud_interpolated", "cutSurfaces"],
+  }
 };
 
 // init scene + camera + lights
@@ -151,11 +143,17 @@ function switchScene(sceneKey) {
 
   if (!config) return;
 
-  scene.clear();
-
+  // hide all meshes
+  Object.values(meshes).forEach(meshData => {
+    if (meshData.mesh) {
+      meshData.mesh.visible = false;
+    }
+  });
+  
+  // show only the visible ones for this scene
   config.visible.forEach((meshName) => {
     if (meshes[meshName] && meshes[meshName].mesh) {
-      scene.add(meshes[meshName].mesh);
+      meshes[meshName].mesh.visible = true;
     }
   });
 
@@ -165,7 +163,7 @@ function switchScene(sceneKey) {
   if (sceneKey === "default") {
     toggleLightButton.style.display = "block";
     toggleRGBButton.style.display = "none";
-  } else if (sceneKey === "pointCloud") {
+  } else if (sceneKey === "pointCloud" || sceneKey === "interpolated") {
     toggleLightButton.style.display = "none";
     toggleRGBButton.style.display = "block";
   }
@@ -389,10 +387,9 @@ function loadMeshes() {
         centerCamera(threejsObject);
       }
 
-      // After all meshes are loaded, set the default scene
+      // temp: default scene is interpolated, not mesh
       if (loadedCount === totalMeshes) {
-        // initStencil(meshes["shell"]);
-        switchScene("default");
+        switchScene("interpolated");
       }
     });
   });
@@ -435,6 +432,8 @@ function centerCamera(object, scale = 1, offset = 0.167) {
 }
 // disposes of old surfaces, gets new cut surfaces from slicer, and adds it to scene
 async function updateCutSurfaces() {
+  if (!meshes.cutSurfaces?.mesh?.visible) return;
+
   // new surfaces from slicer
   const meshObj = await slicer.createCutSurfaces();
 
