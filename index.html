@@ -191,15 +191,22 @@
         background: #ccc;
       }
 
-      /* Bottom content pushes everything above */
-      #bottom-half {
-        padding: 3rem;
-        background: #f0f0f0;
+      #about-munsell-color {
+        padding-left: 4rem;
         min-height: 50vh;
+        background: #f0f0f0;
+        margin: 0;
+        overflow: auto;
       }
 
+      h1,
       h2 {
         color: #333;
+      }
+
+      h1 + p,
+      h2 + p {
+        margin-top: 0.25rem;
       }
     </style>
     <script type="importmap">
@@ -294,9 +301,7 @@
     <div id="about-munsell-color">
       <h1>Munsell Color Space Explorer</h1>
 
-      <p>
-        Drag to pan the camera! Play with the sliders to explore!
-      </p>
+      <p>Drag to pan the camera! Play with the sliders to explore!</p>
 
       <p>
         <strong>
@@ -309,14 +314,12 @@
 
       <h2>Quick Definitions</h2>
       <ul>
+        <li>Hue = colour (red, orange, green, blue, etc.)</li>
+        <li>Value = lightness or darkness</li>
         <li>
-          Hue = colour (red, orange, green, blue, etc.)
-        </li>
-        <li>
-          Value = lightness or darkness
-        </li>
-        <li>
-          Chroma = intensity, vividness (<a href="#chroma-vs-saturation">how does this differ from saturation?</a>)
+          Chroma = intensity, vividness (<a href="#chroma-vs-saturation"
+            >how does this differ from saturation?</a
+          >)
         </li>
       </ul>
 
@@ -331,12 +334,13 @@
       <p>
         For this tool I used the 1943 renotations published by the Optical
         Society of America, which built on his work with extensive experimental
-        data. The dataset is available 
+        data. The dataset is available
         <a
           href="https://www.rit.edu/science/munsell-color-science-lab-educational-resources#munsell-renotation-data"
           target="_blank"
           >here (real.dat)</a
-        > via the Rochester Institute of Technology.
+        >
+        via the Rochester Institute of Technology.
       </p>
 
       <p>
@@ -354,7 +358,9 @@
         classify the colour of soil.
       </p>
 
-      <h2 id="chroma-vs-saturation">What's the Difference Between Chroma and Saturation?</h2>
+      <h2 id="chroma-vs-saturation">
+        What's the Difference Between Chroma and Saturation?
+      </h2>
 
       <p>
         <strong>The short answer:</strong> Chroma means what you think
@@ -401,12 +407,13 @@
         Munsell didn't specify any particular spacing along the vertical axis,
         nor did his dataset include white, black, or grayscale colours. I added
         grayscales by averaging luminance values across each horizontal “plate,”
-        then tacked white and black onto the top and bottom. Thus the y-axis scale
-        is completely arbitrary. 
+        then tacked white and black onto the top and bottom. Thus the y-axis
+        scale is completely arbitrary.
       </p>
 
       <p>
-        To obtain colours in between the original data points, I linearly interpolated in Lab colour space. 
+        To obtain colours in between the original data points, I linearly
+        interpolated in Lab colour space.
       </p>
 
       <p class="note">
