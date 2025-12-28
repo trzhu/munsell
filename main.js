@@ -23,7 +23,7 @@ const sceneConfigs = {
     name: "Points (original Munsell dataset)",
     visible: ["pointcloud_original"],
     hidden: ["shell", "pointcloud_interpolated", "cutSurfaces"],
-  }
+  },
 };
 
 // init scene + camera + lights
@@ -72,6 +72,43 @@ function initScene() {
 }
 
 function initUI() {
+  //draggable floating ui box
+  const floatingUI = document.getElementById("floating-ui");
+  let isDragging = false;
+  let offsetX, offsetY;
+
+  floatingUI.addEventListener("mousedown", (e) => {
+    //don't drag if clicking on interactive elements
+    if (e.target.closest("button, input, select, details, summary")) return;
+
+    isDragging = true;
+    const rect = floatingUI.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+  });
+
+  floatingUI.addEventListener("mousemove", (e) => {
+    if (e.target.closest("button, input, select, details, summary")) {
+      floatingUI.style.cursor = "default";
+    } else {
+      floatingUI.style.cursor = "move";
+    }
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (isDragging) {
+      e.preventDefault();
+
+      floatingUI.style.left = e.clientX - offsetX + "px";
+      floatingUI.style.top = e.clientY - offsetY + "px";
+      floatingUI.style.right = "auto";
+    }
+  });
+
+  document.addEventListener("mouseup", () => {
+    isDragging = false;
+  });
+
   // BUTTONS
   // play/pause button
   const pauseButton = document.getElementById("toggle-rotation");
@@ -144,12 +181,12 @@ function switchScene(sceneKey) {
   if (!config) return;
 
   // hide all meshes
-  Object.values(meshes).forEach(meshData => {
+  Object.values(meshes).forEach((meshData) => {
     if (meshData.mesh) {
       meshData.mesh.visible = false;
     }
   });
-  
+
   // show only the visible ones for this scene
   config.visible.forEach((meshName) => {
     if (meshes[meshName] && meshes[meshName].mesh) {
