@@ -14,6 +14,12 @@ let isPaused = false;
 const meshes = {};
 
 const sceneConfigs = {
+  default: {
+    name: "Volume",
+    // visible: ["shell"],
+    visible: ["shell", "cutSurfaces"],
+    hidden: ["pointcloud_interpolated", "pointcloud_original"],
+  },
   interpolated: {
     name: "Points (interpolated)",
     visible: ["pointcloud_interpolated"],
@@ -424,9 +430,8 @@ function loadMeshes() {
         centerCamera(threejsObject);
       }
 
-      // temp: default scene is interpolated, not mesh
       if (loadedCount === totalMeshes) {
-        switchScene("interpolated");
+        switchScene("default");
       }
     });
   });
