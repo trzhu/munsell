@@ -5,6 +5,7 @@ import { CircularSlider, TwoHandleSlider } from "./ui.js";
 
 // globals
 let scene, camera, renderer, controls;
+let currentScene = "default"; // scene key
 let slicer;
 let isPaused = false;
 
@@ -18,17 +19,18 @@ const sceneConfigs = {
     name: "Volume",
     // visible: ["shell"],
     visible: ["shell", "cutSurfaces"],
-    hidden: ["pointcloud_interpolated", "pointcloud_original"],
   },
   interpolated: {
     name: "Points (interpolated)",
     visible: ["pointcloud_interpolated"],
-    hidden: ["pointcloud_original", "shell", "cutSurfaces"],
   },
   pointCloud: {
     name: "Points (original Munsell dataset)",
     visible: ["pointcloud_original"],
-    hidden: ["shell", "pointcloud_interpolated", "cutSurfaces"],
+  },
+  debug: {
+    name: "Debug",
+    visible: ["cutSurfaces"],
   },
 };
 
@@ -182,6 +184,7 @@ function initUI() {
 
 // Scene switching function
 function switchScene(sceneKey) {
+  currentScene = sceneKey;
   const config = sceneConfigs[sceneKey];
 
   if (!config) return;
@@ -206,6 +209,7 @@ function switchScene(sceneKey) {
   if (sceneKey === "default") {
     toggleLightButton.style.display = "block";
     toggleRGBButton.style.display = "none";
+    updateCutSurfaces();
   } else if (sceneKey === "pointCloud" || sceneKey === "interpolated") {
     toggleLightButton.style.display = "none";
     toggleRGBButton.style.display = "block";
@@ -374,7 +378,6 @@ function loadMeshes() {
       },
     },
     // interpolated point cloud
-    // tbh this should never get shown
     {
       file: "./munsell_pointcloud_interpolated.ply",
       name: "pointcloud_interpolated",
@@ -474,7 +477,8 @@ function centerCamera(object, scale = 1, offset = 0.167) {
 }
 // disposes of old surfaces, gets new cut surfaces from slicer, and adds it to scene
 async function updateCutSurfaces() {
-  if (!meshes.cutSurfaces?.mesh?.visible) return;
+
+  if (!sceneConfigs[currentScene].visible.includes("cutSurfaces")) return;
 
   // new surfaces from slicer
   const meshObj = await slicer.createCutSurfaces();

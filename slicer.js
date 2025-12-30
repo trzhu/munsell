@@ -71,8 +71,8 @@ class Slicer {
   }
 
   async loadTextures() {
-    // const texture3D = await load3DTexture("./texture3d_64.bin", 64);
-    // this.uniforms.interiorTexture.value = texture3D;
+    const texture3D = await load3DTexture("./texture3d_64.bin", 64);
+    this.uniforms.interiorTexture.value = texture3D;
   }
 
   async getMaterial(type) {
