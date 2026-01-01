@@ -222,13 +222,31 @@ def to_mesh(exterior_df):
                 
         else:
             # regular slice, create quads
-            # TODO: maybe adapt which way the quad cuts based on the curvature of the surface?
+            # adaptive quad splitting: split across the shorter diagonal
             N = min(len(idx1), len(idx2))
             for i in range(N):
                 i_next = (i + 1) % N
-                # form two triangles (that make 1 quad)
-                faces.append((idx1[i], idx2[i], idx2[i_next]))
-                faces.append((idx1[i], idx2[i_next], idx1[i_next]))
+                
+                # 3d positions of the 4 quad corners
+                v00, v10 = vertices[idx1[i]], vertices[idx1[i_next]]
+                v01, v11 = vertices[idx2[i]], vertices[idx2[i_next]]
+                
+                p00 = np.array([v00[0], v00[1], v00[2]])
+                p10 = np.array([v10[0], v10[1], v10[2]])
+                p01 = np.array([v01[0], v01[1], v01[2]])
+                p11 = np.array([v11[0], v11[1], v11[2]])
+                
+                #compare diagonal lengths
+                diag1 = np.linalg.norm(p11 - p00)
+                diag2 = np.linalg.norm(p10 - p01)
+                
+                # split along shorter diagonal for better shape
+                if diag1 < diag2:
+                    faces.append((idx1[i], idx2[i], idx2[i_next]))
+                    faces.append((idx1[i], idx2[i_next], idx1[i_next]))
+                else:
+                    faces.append((idx1[i], idx2[i], idx1[i_next]))
+                    faces.append((idx2[i], idx2[i_next], idx1[i_next]))
     
     return vertices, faces
 
@@ -262,97 +280,6 @@ def filter_exterior(df):
     
     return exterior_df
 
-# creates a mesh by subdividing and bilerping each quad
-# into 2^(levels) quads
-def to_bilerped_mesh(df, subdivision_levels=2):
-    
-    df["is_original"] = True
-    df_3d = to_3d_coordinates(df)
-    
-    df_augmented = interpolate_preprocess(df_3d)
-    df_exterior = filter_exterior(df_3d)
-
-    grid = {}
-    for _, row in df_exterior.iterrows():
-        hue = int(row["HueDeg"])
-        value = int(row["Value"])
-        grid[(hue, value)] = row  
-    all_points = []
-
-    def lerp(corner1, corner2):
-        return pd.Series({
-            "X_3D": (corner1["X_3D"] + corner2["X_3D"]) / 2,
-            "Y_3D": (corner1["Y_3D"] + corner2["Y_3D"]) / 2,
-            "Z_3D": (corner1["Z_3D"] + corner2["Z_3D"]) / 2,
-            "is_original": False,
-            "is_interpolated": True # flag for post processing
-            })
-
-    def bilerp(v00, v10, v01, v11, level):
-        # just add eerything lmao gonna have to drop duplicates later
-        all_points.extend([v00, v10, v01, v11])
-        
-        if level > 0:
-            # midpoints
-            left = lerp(v00, v01)
-            right = lerp(v10, v11)
-            bottom = lerp(v00, v10)
-            top = lerp(v01, v11)
-            
-            center = lerp(left, right)
-            
-            # recurse on 4 sub-quads
-            bilerp(v00, bottom, left, center, level - 1)
-            bilerp(bottom, v10, center, right, level - 1)
-            bilerp(center, right, v11, top, level - 1)
-            bilerp(left, center, top, v01, level - 1)
-        
-    # process grid cells
-    hues = sorted(set(h for h, v in grid.keys()))
-    values = sorted(set(v for h, v in grid.keys()))
-    
-    for h1, h2 in pairwise(hues):
-        for v1, v2 in pairwise(values):
-            if all((h, v) in grid for h in [h1, h2] for v in [v1, v2]):
-                bilerp(grid[(h1,v1)], grid[(h2,v1)], 
-                       grid[(h1,v2)], grid[(h2,v2)], subdivision_levels) 
-
-    # process new interpolated points separately
-    df_new = pd.DataFrame(all_points)
-    df_new = df_new[df_new.get('is_interpolated', False).fillna(False)]  # only interpolated points
-    df_new =df_new.drop_duplicates(subset=['X_3D', 'Y_3D', 'Z_3D'])
-    
-    if not df_new.empty:
-        # convert xyz back to hvc
-        hvc = df_new[['X_3D', 'Y_3D', 'Z_3D']].apply(
-            lambda row: xyz_to_hvc(row['X_3D'], row['Y_3D'], row['Z_3D']), 
-            axis=1, result_type='expand'
-        )
-        df_new[['HueDeg', 'Value', 'Chroma']] = hvc
-        
-        # using interpolators from df_augmented, determine Lab values based off XYZ values
-        points_hvc = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
-        interp_L = LinearNDInterpolator(points_hvc, df_augmented["L*"])
-        interp_a = LinearNDInterpolator(points_hvc, df_augmented["a*"])
-        interp_b = LinearNDInterpolator(points_hvc, df_augmented["b*"])
-        
-        query_points = df_new[["HueDeg", "Value", "Chroma"]].to_numpy()
-        df_new["L*"] = interp_L(query_points)
-        df_new["a*"] = interp_a(query_points)
-        df_new["b*"] = interp_b(query_points)
-        
-    # TODO: investigate why not every point got Lab values filled in??
-    
-    # drop duplicates will keep original data because it was added first
-    df_exterior = pd.concat([df_exterior, df_new], ignore_index=True)
-    df_exterior = df_exterior.drop_duplicates(subset=['X_3D', 'Y_3D', 'Z_3D'])
-    
-    # TODO: convert with Lab to sRGB
-   
-    df_exterior.to_csv("temp_subdivided_df.csv", index=False)
-   
-    return df_exterior
-
 # prepares df for interpolation by adding duplicate grays for each chroma
 # and duplicate hue slice at 360 (red)
 def interpolate_preprocess(df):
@@ -383,8 +310,9 @@ def interpolate_preprocess(df):
     
     return df_augmented
 
-# new interpolate using LinearNDInterpolator
-def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
+# interpolate using LinearNDInterpolator. 
+# SNAPS ALL POINTS TO H,V,C GRID. use for point clouds not mesh
+def grid_interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
     """
     hue_steps : int
         Number of subdivisions between adjacent hue samples (of the same value and chroma)
@@ -415,7 +343,7 @@ def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
     for (hue, value), group in df_augmented.groupby(["HueDeg", "Value"]):
         max_chroma[(hue, value)] = group["Chroma"].max()
         
-    write_json(max_chroma)
+    # write_json(max_chroma)
         
     # original hue/value/chroma spacing is 9, 1, 2 
     hue_stepsize, value_stepsize, chroma_stepsize = 9/hue_steps, 1/value_steps, 2/chroma_steps
@@ -500,7 +428,6 @@ def interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
     
     return df_result
 
-
 # put all vertices in a point cloud
 def to_pointcloud(df_3d):
     vertices = []
@@ -511,13 +438,10 @@ def to_pointcloud(df_3d):
         vertices.append((x, y, z, r, g, b, h, v, c, is_clipped))
     return vertices
 
-def write_obj(vertices, faces, filename="munsell_mesh.obj"):
-    with open(filename, "w") as f:
-        for v in vertices:
-            f.write(f"v {v[0]} {v[1]} {v[2]}\n")
-        for face in faces:
-            # obj format uses 1-based indexing
-            f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\n")
+# interpolate along shell surface only. new vertices go on the shell
+# smoother boundary surface
+def shell_interpolate(df, hue_resolution=4.5, value_resolution=0.25):
+    return
 
 def write_ply(vertices, faces, filename):
     with open(filename, "w") as f:
@@ -542,10 +466,6 @@ def write_ply(vertices, faces, filename):
             r_byte = int(r * 255)
             g_byte = int(g * 255)
             b_byte = int(b * 255)
-            # csv may or may not preserve types, so it could be a bool or a string lol
-            # if isinstance(is_clipped, bool):
-            #     is_clipped_byte = int(is_clipped)
-            # else:
             is_clipped_byte = int(str(is_clipped).strip().lower() == "true")
             f.write(f"{x} {y} {z} {r_byte} {g_byte} {b_byte} {h} {v} {c} {is_clipped_byte}\n")
 
@@ -577,55 +497,8 @@ def to_pointcloud_original():
     vertices = to_pointcloud(df_3d)
     write_ply(vertices, [], "munsell_pointcloud_original.ply")
 
-# point cloud and mesh with only the original dataset
-def original():
-    input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
-    df_raw = load_munsell_dat(input_url)
-    
-    df_processed = process(df_raw)
-    df_processed.to_csv("munsell_parsed.csv", index=False)
-    print("saved to munsell_parsed.csv")
-    
-    df_3d = pd.read_csv("munsell_3d_original.csv", index_col=False)
-    # create a point cloud
-    vertices = to_pointcloud(df_3d)
-    write_ply(vertices, [], "munsell_pointcloud.ply")
-    
-    # create a "shell" mesh
-    outer_vertices, faces = to_mesh_old(df_3d)
-    write_ply(outer_vertices, faces, "munsell_mesh_original.ply")
-    
-# dense point cloud
-def to_dense_cloud():
-    # oops i forgot but I was gonna make point cloud interpolated here
-    # create a dense point cloud
-    # vertices = to_pointcloud(df_3d)
-    # write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
-    return
-
-# trying something new
-def smoother_mesh():
-    df = pd.read_csv("munsell_parsed.csv", index_col=False)
-    
-    df_subdivided = to_bilerped_mesh(df, 2)
-    vertices, points = to_mesh(df_subdivided)
-    write_ply(vertices, points, "temp_mesh.ply")
-    
-    
-
 def main():
-    # df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
-    # df_interpolated = interpolate(df_processed)
-    # df_interpolated.to_csv("munsell_interpolated.csv", index=False)
-    # print("saved to munsell_interpolated.csv")
-    
-    # df_interpolated = pd.read_csv("munsell_interpolated.csv", index_col=False)
-    # df_3d = to_3d_coordinates(df_interpolated)
-    # df_3d.to_csv("munsell_3d.csv", index=False)
-    # print("saved to munsell_3d.csv")
-    
-    smoother_mesh()
-    
+    # yeah its time to start again
     
     print(":)")
     
