@@ -4,29 +4,20 @@ varying vec3 vNormal;
 uniform float useLighting;
 
 void main() {
-    // use a rectangular texture like it's cylindrical coordinates
-    // x = radius (0 is central pole)
-    // y = angular coordinate, [0,1] maps to [0, 2pi]
-    // z unchanged
+    // convert xyz to cylindrical
+    float radius = vObjectPosition.x;
+    float theta = mod(vObjectPosition.z + 0.75, 1.0) * 2.0 * 3.14159265359;
     
-    // convert y to theta
-    float theta = vObjectPosition.y * 2.0 * 3.14159265359;
-    
-    // Ccnvert cylindrical to cartesian for texture lookup
-    // x is the radius, theta determines the angular position
-    float x = vObjectPosition.x;
-    float texX = x * cos(theta);
-    float texY = x * sin(theta);
-    float texZ = vObjectPosition.z;
+    // read in cylindrical coordinates
+    float texX = radius * cos(theta);
+    float texY = vObjectPosition.y; // y = height stays the same
+    float texZ = radius * sin(theta);
     
     // remap from [-1,1] back to [0,1] for texture sampling
     vec3 texCoords = vec3(
-        texX * 0.5 + 0.5,
-        texY * 0.5 + 0.5,
-        texZ
+        texX * 0.5 + 0.5, texY, texZ * 0.5 + 0.5
     );
     
-    // sample with transformed coordinates
     vec4 texColor = texture(interiorTexture, texCoords);
     
     vec3 finalColor;
