@@ -324,10 +324,6 @@ def grid_interpolate(df, hue_steps = 2, value_steps=3, chroma_steps=2):
         40 hue steps
         11 value steps (inclusive of white and black)
         38 maximum chroma
-    target: 
-        80+ hue steps
-        20-30+ value steps
-        30+ chroma steps
     """
     df_augmented = interpolate_preprocess(df)
     
@@ -439,9 +435,131 @@ def to_pointcloud(df_3d):
     return vertices
 
 # interpolate along shell surface only. new vertices go on the shell
-# smoother boundary surface
-def shell_interpolate(df, hue_resolution=4.5, value_resolution=0.25):
-    return
+def shell_interpolate(df, hue_steps = 2, value_steps = 3):
+    
+    # preprocess
+    df_augmented = interpolate_preprocess(df)
+    
+    # create Lab interpolators for color
+    points_hvc = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
+    interp_L = LinearNDInterpolator(points_hvc, df_augmented["L*"])
+    interp_a = LinearNDInterpolator(points_hvc, df_augmented["a*"])
+    interp_b = LinearNDInterpolator(points_hvc, df_augmented["b*"])
+    
+    # group by (hue, value) and find max chroma at each
+    max_chroma_points = []
+    for (h, v), group in df_augmented.groupby(["HueDeg", "Value"]):
+        max_c = group["Chroma"].max()
+        max_chroma_points.append([h, v, max_c])
+    
+    # build max_chroma interpolator from original data
+    # interpolates linearly on triangle faces
+    max_chroma_points = np.array(max_chroma_points)
+    max_chroma_interp = LinearNDInterpolator(
+        # input (h, v)
+        max_chroma_points[:, :2],
+        # output max chroma
+        max_chroma_points[:, 2]
+    )
+    
+    # TODO i think do after interpolating - should use interpolated data
+    # build max chroma dictionary
+    max_chroma = defaultdict(int)
+    for (hue, value), group in df_augmented.groupby(["HueDeg", "Value"]):
+        max_chroma[(hue, value)] = group["Chroma"].max()
+    
+    # TODO write after interpolating??
+    write_json(max_chroma)
+    
+    # original hue/value/chroma spacing is 9, 1, 2
+    hue_stepsize, value_stepsize = 9/hue_steps, 1/value_steps
+    
+    # sample (hue, value) space finely
+    # [start, end) so have to add another step to include value=10
+    hue_samples = np.arange(0, 360, hue_stepsize)
+    value_samples = np.arange(0, 10 + value_stepsize, value_stepsize)
+
+    # array of points to query
+    query_hv = []
+    for v in value_samples:
+        for h in hue_samples:
+            query_hv.append([h, v])
+
+    query_hv = np.array(query_hv)
+
+    # Get max chroma at all query points (vectorized)
+    query_chromas = np.array([max_chroma_interp(h, v) for h, v in query_hv])
+
+    # Filter out invalid chromas
+    valid_chroma_mask = ~(np.isnan(query_chromas) | (query_chromas <= 0))
+    valid_hv = query_hv[valid_chroma_mask]
+    valid_chromas = query_chromas[valid_chroma_mask]
+
+    # Build full (h, v, c) query points for Lab interpolation
+    query_hvc = np.column_stack([valid_hv, valid_chromas])
+
+    # Interpolate Lab values (vectorized)
+    new_L = interp_L(query_hvc)
+    new_a = interp_a(query_hvc)
+    new_b = interp_b(query_hvc)
+
+    # Filter out any NaN Lab results
+    valid_lab_mask = ~(np.isnan(new_L) | np.isnan(new_a) | np.isnan(new_b))
+
+    # Apply mask to get final valid points
+    valid_points = query_hvc[valid_lab_mask]
+    valid_L = new_L[valid_lab_mask]
+    valid_a = new_a[valid_lab_mask]
+    valid_b = new_b[valid_lab_mask]
+
+    # Vectorized Lab_to_sRGB conversion
+    Lab_array = np.column_stack([valid_L, valid_a, valid_b])
+    sRGB_array, is_clipped_array = Lab_to_sRGB(Lab_array)
+
+    # Build shell dataframe
+    df_shell = pd.DataFrame({
+        "HueDeg": valid_points[:, 0],
+        "Value": valid_points[:, 1],
+        "Chroma": valid_points[:, 2],
+        "L*": valid_L,
+        "a*": valid_a,
+        "b*": valid_b,
+        "R": sRGB_array[:, 0],
+        "G": sRGB_array[:, 1],
+        "B": sRGB_array[:, 2],
+        "is_original": False,
+        "is_clipped": is_clipped_array,
+        "flagged_to_drop": False
+    })
+    
+    # delaunay triangulation filters out white and black because chroma = 0
+    # add black and white manually
+    bw = pd.DataFrame({
+        "HueDeg": [0.0, 0.0],
+        "Value": [0.0, 10.0],
+        "Chroma": [0.0, 0.0],
+        "L*": [0.0, 100.0],
+        "a*": [0.0, 0.0],
+        "b*": [0.0, 0.0],
+        "R": [0.0, 1.0],
+        "G": [0.0, 1.0],
+        "B": [0.0, 1.0],
+        "is_original": [True, True],
+        "is_clipped": [False, False],
+        "flagged_to_drop": [False, False]
+    })
+    
+    df_shell = pd.concat([df_shell, bw], ignore_index=True)
+
+    return df_shell
+
+def to_smooth_mesh(df):
+    df = shell_interpolate(df)
+    df = filter_exterior(df)
+    df = to_3d_coordinates(df)
+    
+    # return value: vertices, faces
+    return to_mesh(df)
 
 def write_ply(vertices, faces, filename):
     with open(filename, "w") as f:
@@ -498,10 +616,12 @@ def to_pointcloud_original():
     write_ply(vertices, [], "munsell_pointcloud_original.ply")
 
 def main():
-    # yeah its time to start again
+    
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    vertices, faces = to_smooth_mesh(df_processed)
+    write_ply(vertices, faces, "munsell_mesh.ply")
     
     print(":)")
-    
 
 
 if __name__ == "__main__":
