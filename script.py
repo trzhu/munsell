@@ -462,15 +462,6 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
         max_chroma_points[:, 2]
     )
     
-    # TODO i think do after interpolating - should use interpolated data
-    # build max chroma dictionary
-    max_chroma = defaultdict(int)
-    for (hue, value), group in df_augmented.groupby(["HueDeg", "Value"]):
-        max_chroma[(hue, value)] = group["Chroma"].max()
-    
-    # TODO write after interpolating??
-    write_json(max_chroma)
-    
     # original hue/value/chroma spacing is 9, 1, 2
     hue_stepsize, value_stepsize = 9/hue_steps, 1/value_steps
     
@@ -487,7 +478,7 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
 
     query_hv = np.array(query_hv)
 
-    # Get max chroma at all query points (vectorized)
+    # Get max chroma at all query points
     query_chromas = np.array([max_chroma_interp(h, v) for h, v in query_hv])
 
     # Filter out invalid chromas
@@ -498,7 +489,7 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     # Build full (h, v, c) query points for Lab interpolation
     query_hvc = np.column_stack([valid_hv, valid_chromas])
 
-    # Interpolate Lab values (vectorized)
+    # Interpolate Lab values
     new_L = interp_L(query_hvc)
     new_a = interp_a(query_hvc)
     new_b = interp_b(query_hvc)
@@ -550,8 +541,98 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     })
     
     df_shell = pd.concat([df_shell, bw], ignore_index=True)
+    
+    
+    # helper which takes every point in df_exterior (excepte white and black)
+    # and takes the weighted average of it with its radial neighbours
+    def radial_smooth(df, weight=0.2):
+        df_exterior = df.copy()
+        df_exterior = filter_exterior(df)
+        
+        smoothed_points = []
+        
+        # work on each "ring" of values
+        for v in sorted(df_exterior['Value'].unique()):
+            if v == 0 or v == 10:
+                continue
+            
+            ring = df_exterior[df_exterior['Value'] == v].sort_values('HueDeg')
+            
+            chromas = ring['Chroma'].values
+            hues = ring['HueDeg'].values
+            n = len(chromas)
+            
+            for i in range(n):
+                # left and right neighbours
+                left = chromas[(i - 1) % n]
+                right = chromas[(i + 1) % n]
+                
+                # Weighted average
+                nbr_avg = (left + right) / 2
+                new_chroma = weight * chromas[i] + (1 - weight) * nbr_avg
+                
+                smoothed_points.append({
+                    'HueDeg': hues[i],
+                    'Value': v,
+                    'Chroma': new_chroma
+                })
+        
+        # Convert smoothed points to dataframe
+        df_smoothed_pts = pd.DataFrame(smoothed_points)
+        
+        # Compute 3D coordinates
+        df_smoothed_pts = to_3d_coordinates(df_smoothed_pts)
+        
+        # Recompute colors at new (h, v, c) positions
+        points_hvc = df_smoothed_pts[["HueDeg", "Value", "Chroma"]].to_numpy()
+        new_L = interp_L(points_hvc)
+        new_a = interp_a(points_hvc)
+        new_b = interp_b(points_hvc)
+        
+        # Filter valid Lab values
+        valid_mask = ~(np.isnan(new_L) | np.isnan(new_a) | np.isnan(new_b))
+        
+        # Convert Lab to RGB for valid points
+        Lab = np.column_stack([new_L[valid_mask], new_a[valid_mask], new_b[valid_mask]])
+        sRGB, is_clipped = Lab_to_sRGB(Lab)
+        
+        # Build complete dataframe with smoothed points
+        valid_points = points_hvc[valid_mask]
+        valid_xyz = df_smoothed_pts.loc[valid_mask, ['X_3D', 'Y_3D', 'Z_3D']].to_numpy()
+        
+        df_new_points = pd.DataFrame({
+            "HueDeg": valid_points[:, 0],
+            "Value": valid_points[:, 1],
+            "Chroma": valid_points[:, 2],
+            "L*": new_L[valid_mask],
+            "a*": new_a[valid_mask],
+            "b*": new_b[valid_mask],
+            "R": sRGB[:, 0],
+            "G": sRGB[:, 1],
+            "B": sRGB[:, 2],
+            "X_3D": valid_xyz[:, 0],
+            "Y_3D": valid_xyz[:, 1],
+            "Z_3D": valid_xyz[:, 2],
+            "is_original": False,
+            "is_clipped": is_clipped,
+            "flagged_to_drop": False
+        })
+        
+        # merge the new points back into df
+        df = pd.concat([df, df_new_points], ignore_index=True)
+        
+        return df
+    
+    df_smoothed = radial_smooth(df_shell)
+    
+    max_chroma = defaultdict(int)
+    for (hue, value), group in df_smoothed.groupby(["HueDeg", "Value"]):
+        max_chroma[(hue, value)] = group["Chroma"].max()
+    
+    write_json(max_chroma)
 
-    return df_shell
+    return df_smoothed
+
 
 def to_smooth_mesh(df):
     df = shell_interpolate(df)
@@ -615,8 +696,8 @@ def to_pointcloud_original():
     vertices = to_pointcloud(df_3d)
     write_ply(vertices, [], "munsell_pointcloud_original.ply")
 
+
 def main():
-    
     df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     vertices, faces = to_smooth_mesh(df_processed)
     write_ply(vertices, faces, "munsell_mesh.ply")
