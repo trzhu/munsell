@@ -462,107 +462,10 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
         max_chroma_points[:, 2]
     )
     
-    # helper which takes every point in df_exterior (excepte white and black)
-    # and takes the weighted average of it with its radial neighbours
-    # weight = how much to weight original point
-    def radial_smooth(df, weight=0.7):
-        df_exterior = df.copy()
-        df_exterior = filter_exterior(df)
-        
-        smoothed_points = []
-        
-        # work on each "ring" of values
-        for v in sorted(df_exterior['Value'].unique()):
-            if v == 0 or v == 10:
-                continue
-            
-            ring = df_exterior[df_exterior['Value'] == v].sort_values('HueDeg')
-            
-            chromas = ring['Chroma'].values
-            hues = ring['HueDeg'].values
-            n = len(chromas)
-            
-            for i in range(n):
-                # left and right neighbours
-                left = chromas[(i - 1) % n]
-                right = chromas[(i + 1) % n]
-                
-                # Weighted average
-                nbr_avg = (left + right) / 2
-                new_chroma = weight * chromas[i] + (1 - weight) * nbr_avg
-                
-                smoothed_points.append({
-                    'HueDeg': hues[i],
-                    'Value': v,
-                    'Chroma': new_chroma
-                })
-        
-        # Convert smoothed points to dataframe
-        df_smoothed_pts = pd.DataFrame(smoothed_points)
-        
-        # Compute 3D coordinates
-        df_smoothed_pts = to_3d_coordinates(df_smoothed_pts)
-        
-        # Recompute colors at new (h, v, c) positions
-        points_hvc = df_smoothed_pts[["HueDeg", "Value", "Chroma"]].to_numpy()
-        new_L = interp_L(points_hvc)
-        new_a = interp_a(points_hvc)
-        new_b = interp_b(points_hvc)
-        
-        # Filter valid Lab values
-        valid_mask = ~(np.isnan(new_L) | np.isnan(new_a) | np.isnan(new_b))
-        
-        # Convert Lab to RGB for valid points
-        Lab = np.column_stack([new_L[valid_mask], new_a[valid_mask], new_b[valid_mask]])
-        sRGB, is_clipped = Lab_to_sRGB(Lab)
-        
-        # Build complete dataframe with smoothed points
-        valid_points = points_hvc[valid_mask]
-        valid_xyz = df_smoothed_pts.loc[valid_mask, ['X_3D', 'Y_3D', 'Z_3D']].to_numpy()
-        
-        df_new_points = pd.DataFrame({
-            "HueDeg": valid_points[:, 0],
-            "Value": valid_points[:, 1],
-            "Chroma": valid_points[:, 2],
-            "L*": new_L[valid_mask],
-            "a*": new_a[valid_mask],
-            "b*": new_b[valid_mask],
-            "R": sRGB[:, 0],
-            "G": sRGB[:, 1],
-            "B": sRGB[:, 2],
-            "X_3D": valid_xyz[:, 0],
-            "Y_3D": valid_xyz[:, 1],
-            "Z_3D": valid_xyz[:, 2],
-            "is_original": False,
-            "is_clipped": is_clipped,
-            "flagged_to_drop": False
-        })
-        
-        # merge the new points back into df
-        df = pd.concat([df, df_new_points], ignore_index=True)
-        
-        return df
-    
-    df_smoothed_input = radial_smooth(df_augmented)
-    
-    # rebuild max_chroma interpolator from smoothed data
-    smoothed_max_chroma_points = []
-    df_smoothed_exterior = filter_exterior(df_smoothed_input)
-    for (h, v), group in df_smoothed_exterior.groupby(["HueDeg", "Value"]):
-        max_c = group["Chroma"].max()
-        smoothed_max_chroma_points.append([h, v, max_c])
-    
-    smoothed_max_chroma_points = np.array(smoothed_max_chroma_points)
-    max_chroma_interp = LinearNDInterpolator(
-        smoothed_max_chroma_points[:, :2],
-        smoothed_max_chroma_points[:, 2]
-    )
-    
     # original hue/value/chroma spacing is 9, 1, 2
     hue_stepsize, value_stepsize = 9/hue_steps, 1/value_steps
     
     # sample (hue, value) space finely
-    # [start, end) so have to add another step to include value=10
     hue_samples = np.arange(0, 360, hue_stepsize)
     value_samples = np.arange(0, 10 + value_stepsize, value_stepsize)
 
@@ -636,31 +539,22 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     
     df_result = pd.concat([df_result, bw], ignore_index=True)
     
-    # write smoothed max chroma to json
+    # build max chroma dictionary
     max_chroma = defaultdict(int)
     for (hue, value), group in df_result.groupby(["HueDeg", "Value"]):
         max_chroma[(hue, value)] = group["Chroma"].max()
     
     write_json(max_chroma)
+    
+    df_result.to_csv("temp.csv")
 
     return df_result
 
 
 def to_smooth_mesh(df):
-    # df = shell_interpolate(df)
-    # df = filter_exterior(df)
-    # df = to_3d_coordinates(df)
-    
-    df1 = shell_interpolate(df)
-    print("After shell_interpolate:", df1.columns.tolist())
-    
-    df2 = filter_exterior(df1)
-    print("After filter_exterior:", df2.columns.tolist())
-    
-    df3 = to_3d_coordinates(df2)
-    print("After to_3d_coordinates:", df3.columns.tolist())
-    
-    return to_mesh(df3)
+    df = shell_interpolate(df)
+    df = filter_exterior(df)
+    df = to_3d_coordinates(df)
     
     # return value: vertices, faces
     return to_mesh(df)
