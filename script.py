@@ -283,7 +283,7 @@ def filter_exterior(df):
 # prepares df for interpolation by adding duplicate grays for each chroma
 # and duplicate hue slice at 360 (red)
 def interpolate_preprocess(df):
-    df_augmented = df.copy()
+    df_augmented = df
     df_augmented["is_original"] = True
     df_augmented["flagged_to_drop"] = False
     
@@ -436,9 +436,7 @@ def to_pointcloud(df_3d):
 
 # interpolate along shell surface only. new vertices go on the shell
 def shell_interpolate(df, hue_steps = 2, value_steps = 3):
-    
-    # preprocess
-    df_augmented = interpolate_preprocess(df)
+    df_augmented = grid_interpolate(df)
     
     # create Lab interpolators for color
     points_hvc = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
@@ -548,7 +546,6 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
 
 
 def to_smooth_mesh(df):
-    df = grid_interpolate(df)
     df = shell_interpolate(df)
     df = filter_exterior(df)
     df = to_3d_coordinates(df)
