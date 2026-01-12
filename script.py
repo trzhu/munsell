@@ -446,15 +446,14 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     interp_a = LinearNDInterpolator(points_hvc, df_augmented["a*"])
     interp_b = LinearNDInterpolator(points_hvc, df_augmented["b*"])
     
-    # group by (hue, value) and find max chroma at each
-    max_chroma_points = []
-    for (h, v), group in df_augmented.groupby(["HueDeg", "Value"]):
-        max_c = group["Chroma"].max()
-        max_chroma_points.append([h, v, max_c])
+    # build max chroma dictionary
+    max_chroma = defaultdict(float)
+    for (hue, value), group in df_augmented.groupby(["HueDeg", "Value"]):
+        max_chroma[(hue, value)] = group["Chroma"].max()
     
     # build max_chroma interpolator from original data
     # interpolates linearly on triangle faces
-    max_chroma_points = np.array(max_chroma_points)
+    max_chroma_points = np.array([[h, v, c] for (h, v), c in max_chroma.items()])
     max_chroma_interp = LinearNDInterpolator(
         # input (h, v)
         max_chroma_points[:, :2],
@@ -539,19 +538,17 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     
     df_result = pd.concat([df_result, bw], ignore_index=True)
     
-    # build max chroma dictionary
-    max_chroma = defaultdict(int)
+    # update max chroma dictionary with interpolated results
     for (hue, value), group in df_result.groupby(["HueDeg", "Value"]):
-        max_chroma[(hue, value)] = group["Chroma"].max()
+        max_chroma[(hue, value)] = max(max_chroma[(hue, value)], group["Chroma"].max())
     
     write_json(max_chroma)
-    
-    df_result.to_csv("temp.csv")
 
     return df_result
 
 
 def to_smooth_mesh(df):
+    df = grid_interpolate(df)
     df = shell_interpolate(df)
     df = filter_exterior(df)
     df = to_3d_coordinates(df)
