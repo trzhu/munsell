@@ -9,15 +9,14 @@ void main() {
     float theta = atan(xzPos.y, xzPos.x) + 3.14159265359;
     float radius = length(xzPos) * 2.0;
     // y remains vertical coordinate for cylindrical coordinates
+    float height = vObjectPosition.y;
     
-    // read in cylindrical coordinates
-    float texX = radius * cos(theta);
-    float texY = vObjectPosition.y; // y = height stays the same
-    float texZ = radius * sin(theta);
     
     // remap from [-1,1] back to [0,1] for texture sampling
     vec3 texCoords = vec3(
-        texX * 0.5 + 0.5, texY, texZ * 0.5 + 0.5
+        radius, 
+        height, 
+        theta / (2.0 * 3.14159265359)
     );
     
     vec4 texColor = texture(interiorTexture, texCoords);

@@ -12,8 +12,8 @@ void main() {
     vec3 normalizedPos;
     // x from -38 to +38 -> 0 to 1
     normalizedPos.x = (worldPosition.x + 38.0) / 76.0;
-    // y from 0 to 30 -> 0 to 1
-    normalizedPos.y = worldPosition.y / 30.0;
+    // y from 0 to 40 -> 0 to 1
+    normalizedPos.y = worldPosition.y / 40.0;
     // z from -38 to +38 -> 0 to 1 
     normalizedPos.z = (worldPosition.z + 38.0) / 76.0;
 
