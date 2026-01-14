@@ -30,7 +30,7 @@ def texture_preprocess(df, max_chroma=38):
     
     return df_extended
 
-def to_3d_texture(df, size):
+def to_3d_texture(df, h_res=256, v_res=128, c_res=128):
     # duplicate grays, wrap hue, extend chroma
     df_extended = texture_preprocess(df)
     
@@ -58,18 +58,18 @@ def to_3d_texture(df, size):
     interp_b = RegularGridInterpolator((chroma_points, hue_points, value_points), b_grid, bounds_error=False, fill_value=0)
     
     # Create texture coordinate grids
-    chroma_grid = np.linspace(0, 38, size)
-    hue_grid = np.linspace(0, 360, size)
-    value_grid = np.linspace(0, 10, size)
+    chroma_grid = np.linspace(0, 38, c_res)
+    hue_grid = np.linspace(0, 360, h_res)
+    value_grid = np.linspace(0, 10, v_res)
     
     # Create meshgrid for vectorized interpolation
     C, H, V = np.meshgrid(chroma_grid, hue_grid, value_grid, indexing='ij')
     query_points = np.stack([C.ravel(), H.ravel(), V.ravel()], axis=1)
     
     #interpolate Lab values
-    L_vals = interp_L(query_points).reshape(size, size, size)
-    a_vals = interp_a(query_points).reshape(size, size, size)
-    b_vals = interp_b(query_points).reshape(size, size, size)
+    L_vals = interp_L(query_points).reshape(c_res, h_res, v_res)
+    a_vals = interp_a(query_points).reshape(c_res, h_res, v_res)
+    b_vals = interp_b(query_points).reshape(c_res, h_res, v_res)
     
     # Replace any remaining NaN with black
     L_vals = np.nan_to_num(L_vals, nan=0.0)
@@ -81,12 +81,14 @@ def to_3d_texture(df, size):
     sRGB_array, is_clipped = Lab_to_sRGB(lab_array)
     
     # Reshape back to 3D
-    r_vals = sRGB_array[:, 0].reshape(size, size, size)
-    g_vals = sRGB_array[:, 1].reshape(size, size, size)
-    b_vals = sRGB_array[:, 2].reshape(size, size, size)
+    r_vals = sRGB_array[:, 0].reshape(c_res, h_res, v_res)
+    g_vals = sRGB_array[:, 1].reshape(c_res, h_res, v_res)
+    b_vals = sRGB_array[:, 2].reshape(c_res, h_res, v_res)
     
     texture_data = {'R': r_vals, 'G': g_vals, 'B': b_vals}
     texture = texture_postprocess(texture_data)
+    
+    # print(f"dimensions: {texture.shape}")
     
     return texture
 
@@ -108,6 +110,33 @@ def texture_postprocess(texture_data):
     
     return texture
 
+def debug_textures(size=64):
+    # white to black along x
+    x_tex = np.zeros((size, size, size, 4), dtype=np.float32)
+    for i in range(size):
+        x_tex[i, :, :, :3] = i / (size - 1)
+    x_tex[:, :, :, 3] = 1.0
+    
+    # y gradient
+    y_tex = np.zeros((size, size, size, 4), dtype=np.float32)
+    for j in range(size):
+        y_tex[:, j, :, :3] = j / (size - 1)
+    y_tex[:, :, :, 3] = 1.0
+    
+    # z gradient
+    z_tex = np.zeros((size, size, size, 4), dtype=np.float32)
+    for k in range(size):
+        z_tex[:, :, k, :3] = k / (size - 1)
+    z_tex[:, :, :, 3] = 1.0
+    
+    with open("debug_x.raw", 'wb') as f:
+        x_tex.tofile(f)
+    with open("debug_y.raw", 'wb') as f:
+        y_tex.tofile(f)
+    with open("debug_z.raw", 'wb') as f:
+        z_tex.tofile(f)
+    print("Created debug textures")    
+
 def write_texture(texture, output_path):
     with open(output_path, 'wb') as f:
         texture.tofile(f)
@@ -116,7 +145,7 @@ def write_texture(texture, output_path):
 
 if __name__ == "__main__":
     df = pd.read_csv("munsell_parsed.csv", index_col=False)
-    texture = to_3d_texture(df, 64)
+    texture = to_3d_texture(df)
     write_texture(texture, "munsell_texture.raw")
     
     
