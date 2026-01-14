@@ -6,7 +6,8 @@ uniform float useLighting;
 void main() {
     // convert xz location to polar coordinates
     vec2 xzPos = vObjectPosition.xz - vec2(0.5, 0.5);
-    float theta = atan(xzPos.y, xzPos.x) + 3.14159265359;
+    // need a 180 degree offset 
+    float theta = mod(atan(xzPos.y, xzPos.x) + 3.14159265359, 6.28318530718);
     float radius = length(xzPos) * 2.0;
     // y remains vertical coordinate for cylindrical coordinates
     float height = vObjectPosition.y;
