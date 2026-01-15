@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 // Y scaling factor used for mesh
-const Y_SCALE = 3;
+const Y_SCALE = 4;
 
 class Slicer {
   constructor() {
@@ -71,7 +71,8 @@ class Slicer {
   }
 
   async loadTextures() {
-    const texture3D = await load3DTexture("./texture3d_64.bin", 64);
+    // dimensions should be in chroma, value, hue order
+    const texture3D = await load3DTexture("./munsell_texture.raw", 64, 32, 128);
     this.uniforms.interiorTexture.value = texture3D;
   }
 
@@ -102,6 +103,8 @@ class Slicer {
       fragmentShader,
       uniforms: this.uniforms,
       transparent: true,
+      // temp debug
+      // wireframe: true
     });
 
     // cache cut surface material bc it needs to be retrieved multiple times
@@ -312,13 +315,13 @@ class Slicer {
     minH = (minH * 180) / Math.PI;
     maxH = (maxH * 180) / Math.PI;
     const hueSpan = maxH > minH ? maxH - minH : 360 - minH + maxH;
-    const numSteps = Math.floor(hueSpan / 9);
+    const numSteps = Math.floor(hueSpan / 4.5);
     const startH = Math.floor(minH / 9) * 9 + 9;
 
     const sequence = [minH];
     // for every h from minH to maxH in increments of 9 (the grid points)
     for (let i = 1; i < numSteps; i++) {
-      sequence.push((startH + i * 9) % 360);
+      sequence.push((startH + i * 4.5) % 360);
     }
     sequence.push(maxH);
 
@@ -490,18 +493,18 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
   
 }
 
-async function load3DTexture(filename, size) {
+async function load3DTexture(filename, x_size, y_size, z_size) {
   const response = await fetch(filename);
   if (!response.ok) {
     throw new Error(`Failed to load texture: ${response.statusText}`);
   }
 
   const arrayBuffer = await response.arrayBuffer();
-  const data = new Uint8Array(arrayBuffer);
+  const data = new Float32Array(arrayBuffer);
 
-  const texture = new THREE.Data3DTexture(data, size, size, size);
+  const texture = new THREE.Data3DTexture(data, x_size, y_size, z_size);
   texture.format = THREE.RGBAFormat;
-  texture.type = THREE.UnsignedByteType;
+  texture.type = THREE.FloatType;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;
