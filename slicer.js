@@ -199,10 +199,13 @@ class Slicer {
   }
 
   cutSurface(surfaceType, isMax, hueSequence = null) {
-    const minH = this.uniforms.hueMin.value * 180 / Math.PI, maxH = this.uniforms.hueMax.value * 180 / Math.PI;
-    const minV = this.uniforms.valueMin.value, maxV = this.uniforms.valueMax.value;
-    const minC = this.uniforms.chromaMin.value, maxC = this.uniforms.chromaMax.value;
-    
+    const minH = (this.uniforms.hueMin.value * 180) / Math.PI,
+      maxH = (this.uniforms.hueMax.value * 180) / Math.PI;
+    const minV = this.uniforms.valueMin.value,
+      maxV = this.uniforms.valueMax.value;
+    const minC = this.uniforms.chromaMin.value,
+      maxC = this.uniforms.chromaMax.value;
+
     // surface type implies that is the fixed coordinate
     let fixed;
     if (surfaceType === "hue") {
@@ -260,6 +263,7 @@ class Slicer {
 
         // find valid value range for this hue at this chroma
         const { validMinV, validMaxV } = this.valueRange(h, c, minV, maxV);
+        // console.log("at hue = ", h, "minV, maxV found:", validMinV, validMaxV);
         const clampedMinV = clamp(minV, validMinV, validMaxV);
         const clampedMaxV = clamp(maxV, validMinV, validMaxV);
 
@@ -275,39 +279,65 @@ class Slicer {
   }
 
   // finds minimum and maximum value that is inside the volume at this chroma
-  // TODO: PROBLEM IS THIS ONLY CHECKS INTEGERS SO THERE ARE GAPS
-  // TODO: WHY DOES IT ACT WEIRD FOR SOME HUE VALUES
+  // approach: first linearly march through the integers to find the min/max valid integer,
+  // then binary search to find the decimal point
   valueRange(h, c, minV, maxV) {
-    let left = Math.floor(minV), right = Math.ceil(maxV);
-    let validMinV = null, validMaxV = null;
-
-    // two pointer approach
-    while (left <= right && (validMinV === null || validMaxV === null)) {
-      // check left pointer if we haven't found validMinV yet
-      if (validMinV === null) {
-        const maxChromaLeft = this.getMaxChroma(h, left);
-        if (c <= maxChromaLeft) {
-          validMinV = left;
-        } else {
-          left++;
+    const EPSILON = 0.001;
+    
+    let validMinV = null;
+    let validMaxV = null;
+    
+    let intMinV = Math.floor(minV);
+    let intMaxV = Math.ceil(maxV);
+    
+    while (intMinV <= intMaxV && validMinV === null) {
+      const maxChromaLeft = this.getMaxChroma(h, intMinV);
+      if (c <= maxChromaLeft) {
+        // found first valid integer! Now binary search for exact transition point
+        let left = Math.max(minV, intMinV - 1);
+        let right = intMinV;
+        
+        while (right - left > EPSILON) {
+          const mid = (left + right) / 2;
+          const maxChromaAtMid = this.getMaxChroma(h, mid);
+          
+          if (c <= maxChromaAtMid) {
+            right = mid; // valid, search lower
+          } else {
+            left = mid; // invalid, search higher
+          }
         }
-      }
-      // check right pointer if we haven't found validMaxV yet
-      if (validMaxV === null && left <= right) {
-        const maxChromaRight = this.getMaxChroma(h, right);
-        if (c <= maxChromaRight) {
-          validMaxV = right;
-        } else {
-          right--;
-        }
+        validMinV = right;
+      } else {
+        intMinV++; // march by step of 1.0
       }
     }
-
-    // if no valid min or max was found, intentionally return null
-    return {
-      validMinV,
-      validMaxV,
-    };
+    
+    // find validMaxV - march downward by 1.0 to find last valid integer
+    while (intMaxV >= Math.floor(minV) && validMaxV === null) {
+      const maxChromaRight = this.getMaxChroma(h, intMaxV);
+      if (c <= maxChromaRight) {
+        // found last valid integer! now binary search
+        let left = intMaxV;
+        let right = Math.min(maxV, intMaxV + 1);
+        
+        while (right - left > EPSILON) {
+          const mid = (left + right) / 2;
+          const maxChromaAtMid = this.getMaxChroma(h, mid);
+          
+          if (c <= maxChromaAtMid) {
+            left = mid;
+          } else {
+            right = mid;
+          }
+        }
+        validMaxV = left;
+      } else {
+        intMaxV--; //march downwards by step of 1.0
+      }
+    }
+    
+    return { validMinV, validMaxV };
   }
 
   hueLoop(minH, maxH) {
@@ -460,18 +490,18 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
       vertexIndices2[i] = null;
     }
   }
-  
+
   for (let i = 0; i < edge1.length - 1; i++) {
     const v00 = vertexIndices1[i];
     const v01 = vertexIndices1[i + 1];
     const v10 = vertexIndices2[i];
     const v11 = vertexIndices2[i + 1];
-    
+
     // skip if any vertex is null (mesh will be discontinuous)
     if (v00 === null || v01 === null || v10 === null || v11 === null) {
       continue;
     }
-    
+
     // create two triangles for this quad
     if (reverseWinding) {
       indices.push(v00, v10, v01);
@@ -490,7 +520,6 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
-  
 }
 
 async function load3DTexture(filename, x_size, y_size, z_size) {
