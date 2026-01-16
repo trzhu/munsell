@@ -464,6 +464,8 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     max_chroma = defaultdict(float)
     for (hue, value), group in df.groupby(["HueDeg", "Value"]):
         max_chroma[(hue, value)] = group["Chroma"].max()
+        
+    write_json(max_chroma)
     
     # build max_chroma interpolator from original data
     # interpolates linearly on triangle faces
@@ -555,8 +557,6 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     # update max chroma dictionary with interpolated results
     for (hue, value), group in df_result.groupby(["HueDeg", "Value"]):
         max_chroma[(hue, value)] = max(max_chroma[(hue, value)], group["Chroma"].max())
-    
-    write_json(max_chroma)
 
     return df_result
 
