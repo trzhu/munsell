@@ -77,7 +77,7 @@ class Slicer {
 
   async loadTextures() {
     // dimensions should be in chroma, value, hue order
-    const texture3D = await load3DTexture("./munsell_texture.raw", 64, 32, 128);
+    const texture3D = await load3DTexture("../assets/munsell_texture.raw", 64, 32, 128);
     this.uniforms.interiorTexture.value = texture3D;
   }
 
@@ -225,7 +225,7 @@ class Slicer {
     let loop;
     if (surfaceType === "hue") {
       loop = [minV];
-      for (let v = Math.floor(minV + 1); v < maxV; v += 1) {
+      for (let v = Math.floor(minV + 1); v < maxV; v += 0.2) {
         loop.push(v);
       }
       loop.push(maxV);
@@ -453,7 +453,7 @@ function clamp(num, min, max) {
 }
 
 async function loadMaxChromaDict() {
-  const response = await fetch("max_chroma.json");
+  const response = await fetch("./assets/max_chroma.json");
   const data = await response.json();
 
   return Object.fromEntries(
@@ -467,7 +467,7 @@ async function loadMaxChromaDict() {
 }
 
 async function loadChromaValueRanges() {
-  const response = await fetch("chroma_value_ranges.json");
+  const response = await fetch("./assets/chroma_value_ranges.json");
   const data = await response.json();
 
   return Object.fromEntries(

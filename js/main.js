@@ -11,7 +11,6 @@ let isPaused = false;
 
 // dictionary of meshes
 // keys: "shell", "pointcloud", "pointcloud_original, cutSurfaces"
-// todo: maybe just store the meshes instead of the whole meshobj. i dont bother with any of the other fields anyways
 const meshes = {};
 
 const sceneConfigs = {
@@ -370,7 +369,7 @@ async function loadCustomPLY(url) {
 function loadMeshes() {
   const meshConfigs = [
     {
-      file: "./munsell_mesh.ply",
+      file: "./assets/munsell_mesh.ply",
       name: "shell",
       type: "mesh",
       materials: {
@@ -379,7 +378,7 @@ function loadMeshes() {
     },
     // interpolated point cloud
     {
-      file: "./munsell_pointcloud_interpolated.ply",
+      file: "./assets/munsell_pointcloud_interpolated.ply",
       name: "pointcloud_interpolated",
       type: "points",
       materials: {
@@ -388,7 +387,7 @@ function loadMeshes() {
     },
     // raw real.dat data points
     {
-      file: "./munsell_pointcloud_original.ply",
+      file: "./assets/munsell_pointcloud_original.ply",
       name: "pointcloud_original",
       type: "points",
       materials: {
