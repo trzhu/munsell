@@ -8,8 +8,8 @@ from itertools import pairwise
 from collections import defaultdict
 from scipy.interpolate import LinearNDInterpolator
 
-# 3 was chosen arbitrarily
-Y_SCALE = 3
+# 4 was chosen arbitrarily
+Y_SCALE = 4
 # munsell used illuminant C for his work
 ILLUM_C = CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["C"]
 
@@ -247,6 +247,20 @@ def to_mesh(exterior_df):
                 else:
                     faces.append((idx1[i], idx2[i], idx1[i_next]))
                     faces.append((idx2[i], idx2[i_next], idx1[i_next]))
+                    
+    # add arbitrary vertices (not connected to anything) to make its bounding box "centred"
+    # useful for 3d texture later
+    # then append to vertices
+    dirs = [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+    for d in dirs:
+        vertices.append((
+            d[0] * 38, # X_3D
+            Y_SCALE * 5.5, # Y_3D
+            d[1] * 38, #Z_3D
+            0, 0, 0, #RGB
+            0, 0, 0, #huedeg, value, chroma, i hope its fine to leave these arbitrary
+            False # is_clipped
+        ))
     
     return vertices, faces
 
@@ -435,18 +449,20 @@ def to_pointcloud(df_3d):
     return vertices
 
 # interpolate along shell surface only. new vertices go on the shell
+# TODO: build off bilerping idk?
 def shell_interpolate(df, hue_steps = 2, value_steps = 3):
-    df_augmented = grid_interpolate(df)
+    # if not using grid_interpolate, have to preprocess
+    df = interpolate_preprocess(df)
     
     # create Lab interpolators for color
-    points_hvc = df_augmented[["HueDeg", "Value", "Chroma"]].to_numpy()
-    interp_L = LinearNDInterpolator(points_hvc, df_augmented["L*"])
-    interp_a = LinearNDInterpolator(points_hvc, df_augmented["a*"])
-    interp_b = LinearNDInterpolator(points_hvc, df_augmented["b*"])
+    points_hvc = df[["HueDeg", "Value", "Chroma"]].to_numpy()
+    interp_L = LinearNDInterpolator(points_hvc, df["L*"])
+    interp_a = LinearNDInterpolator(points_hvc, df["a*"])
+    interp_b = LinearNDInterpolator(points_hvc, df["b*"])
     
     # build max chroma dictionary
     max_chroma = defaultdict(float)
-    for (hue, value), group in df_augmented.groupby(["HueDeg", "Value"]):
+    for (hue, value), group in df.groupby(["HueDeg", "Value"]):
         max_chroma[(hue, value)] = group["Chroma"].max()
     
     # build max_chroma interpolator from original data
@@ -607,8 +623,18 @@ def to_pointcloud_original():
     vertices = to_pointcloud(df_3d)
     write_ply(vertices, [], "munsell_pointcloud_original.ply")
 
+def to_pointcloud_interpolated():
+    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    df_interpolated = grid_interpolate(df_processed)
+    df_3d = to_3d_coordinates(df_interpolated)
+    
+    vertices = to_pointcloud(df_3d)
+    write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
 
 def main():
+    # to_pointcloud_original()
+    # to_pointcloud_interpolated()
+    
     df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
     vertices, faces = to_smooth_mesh(df_processed)
     write_ply(vertices, faces, "munsell_mesh.ply")
