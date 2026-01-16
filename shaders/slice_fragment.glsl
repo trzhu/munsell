@@ -4,26 +4,39 @@ varying vec3 vNormal;
 uniform float useLighting;
 
 void main() {
-    // Sample the 3D texture using the normalized position coordinates
-    vec4 texColor = texture(interiorTexture, vObjectPosition);
-    
-    // gl_FragColor = texColor;
+    // convert xz location to polar coordinates
+    vec2 xzPos = vObjectPosition.xz - vec2(0.5, 0.5);
+    // add pi to convert from [-pi, pi] to [0, 2pi] then add another pi for 180 deg offset
+    float theta = mod(atan(xzPos.y, xzPos.x), 6.28318530718);
 
+    float radius = length(xzPos) * 2.0;
+    // y remains vertical coordinate for cylindrical coordinates
+    float height = vObjectPosition.y;
+    
+    
+    // remap from [-1,1] back to [0,1] for texture sampling
+    vec3 texCoords = vec3(
+        radius, 
+        height, 
+        theta / (2.0 * 3.14159265359)
+    );
+    
+    vec4 texColor = texture(interiorTexture, texCoords);
+    
+    // DEBUG: visualize texture coords as white to black
+    // radial
+    // texColor = vec4(radius, radius, radius, 1.0);
+    // angular
+    // texColor = vec4(theta / (2.0 * 3.14159265359), theta / (2.0 * 3.14159265359), theta / (2.0 * 3.14159265359), 1.0);
+    
     vec3 finalColor;
     if(useLighting > 0.5) {
-        // diffuse lighting
         vec3 lightDirection = normalize(vec3(1.0, 1.0, 1.0));
         float lightIntensity = max(dot(normalize(vNormal), lightDirection), 0.3);
         finalColor = texColor.rgb * lightIntensity;
     } else {
         finalColor = texColor.rgb;
     }
-
-    gl_FragColor = vec4(finalColor, 1.0);
-
-    // debug - use position as colour
-    // gl_FragColor = vec4(vObjectPosition, 1.0);
     
-    // debug - translucent material
-    // gl_FragColor = vec4(1.0, 1.0, 1.0, 0.5);
+    gl_FragColor = vec4(finalColor, 1.0);
 }

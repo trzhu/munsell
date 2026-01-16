@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 // Y scaling factor used for mesh
-const Y_SCALE = 3;
+const Y_SCALE = 4;
 
 class Slicer {
   constructor() {
@@ -22,11 +22,16 @@ class Slicer {
     this.shadersPromise = this.loadShaders();
     this.loadTextures();
 
-    // load max chroma dictionary from jsons
+    // load max chroma dictionary and value range data from jsons
     this.maxChromaPromise = loadMaxChromaDict();
     this.maxChroma = null;
     this.maxChromaPromise.then((data) => {
       this.maxChroma = data;
+    });
+    this.chromaValueRangesPromise = loadChromaValueRanges();
+    this.chromaValueRanges = null;
+    this.chromaValueRangesPromise.then((data) => {
+      this.chromaValueRanges = data;
     });
 
     // pointer for future cut surface material
@@ -71,8 +76,9 @@ class Slicer {
   }
 
   async loadTextures() {
-    // const texture3D = await load3DTexture("./texture3d_64.bin", 64);
-    // this.uniforms.interiorTexture.value = texture3D;
+    // dimensions should be in chroma, value, hue order
+    const texture3D = await load3DTexture("../assets/munsell_texture.raw", 64, 32, 128);
+    this.uniforms.interiorTexture.value = texture3D;
   }
 
   async getMaterial(type) {
@@ -102,6 +108,8 @@ class Slicer {
       fragmentShader,
       uniforms: this.uniforms,
       transparent: true,
+      // temp debug
+      // wireframe: true
     });
 
     // cache cut surface material bc it needs to be retrieved multiple times
@@ -196,10 +204,13 @@ class Slicer {
   }
 
   cutSurface(surfaceType, isMax, hueSequence = null) {
-    const minH = this.uniforms.hueMin.value * 180 / Math.PI, maxH = this.uniforms.hueMax.value * 180 / Math.PI;
-    const minV = this.uniforms.valueMin.value, maxV = this.uniforms.valueMax.value;
-    const minC = this.uniforms.chromaMin.value, maxC = this.uniforms.chromaMax.value;
-    
+    const minH = (this.uniforms.hueMin.value * 180) / Math.PI,
+      maxH = (this.uniforms.hueMax.value * 180) / Math.PI;
+    const minV = this.uniforms.valueMin.value,
+      maxV = this.uniforms.valueMax.value;
+    const minC = this.uniforms.chromaMin.value,
+      maxC = this.uniforms.chromaMax.value;
+
     // surface type implies that is the fixed coordinate
     let fixed;
     if (surfaceType === "hue") {
@@ -214,7 +225,7 @@ class Slicer {
     let loop;
     if (surfaceType === "hue") {
       loop = [minV];
-      for (let v = Math.floor(minV + 1); v < maxV; v += 1) {
+      for (let v = Math.floor(minV + 1); v < maxV; v += 0.2) {
         loop.push(v);
       }
       loop.push(maxV);
@@ -272,38 +283,61 @@ class Slicer {
   }
 
   // finds minimum and maximum value that is inside the volume at this chroma
-  // TODO: PROBLEM IS THIS ONLY CHECKS INTEGERS SO THERE ARE GAPS
-  // TODO: WHY DOES IT ACT WEIRD FOR SOME HUE VALUES
-  valueRange(h, c, minV, maxV) {
-    let left = Math.floor(minV), right = Math.ceil(maxV);
-    let validMinV = null, validMaxV = null;
+  getValueRange(hue, chroma) {
+    const chromaStep = 0.5; // as used in the json
+    
+    // find surrounding hue values (integers 0-359)
+    const lowHue = Math.floor(hue);
+    const highHue = (lowHue + 1) % 360;
+    
+    // find surrounding chroma values (0.0, 0.5, ... 37.5)
+    const lowChromaNum = Math.floor(chroma / chromaStep) * chromaStep;
+    const highChromaNum = lowChromaNum + chromaStep;
+    // convert to string with 1 decimal place to match the json
+    const lowChroma = lowChromaNum.toFixed(1);
+    const highChroma = highChromaNum.toFixed(1);
+    
+    // Get the 4 corner values for bilinear interpolation
+    const r00 = this.chromaValueRanges[lowHue]?.[lowChroma] || [null, null];
+    const r10 = this.chromaValueRanges[highHue]?.[lowChroma] || [null, null];
+    const r01 = this.chromaValueRanges[lowHue]?.[highChroma] || [null, null];
+    const r11 = this.chromaValueRanges[highHue]?.[highChroma] || [null, null];
 
-    // two pointer approach
-    while (left <= right && (validMinV === null || validMaxV === null)) {
-      // check left pointer if we haven't found validMinV yet
-      if (validMinV === null) {
-        const maxChromaLeft = this.getMaxChroma(h, left);
-        if (c <= maxChromaLeft) {
-          validMinV = left;
-        } else {
-          left++;
-        }
-      }
-      // check right pointer if we haven't found validMaxV yet
-      if (validMaxV === null && left <= right) {
-        const maxChromaRight = this.getMaxChroma(h, right);
-        if (c <= maxChromaRight) {
-          validMaxV = right;
-        } else {
-          right--;
-        }
-      }
+    // interpolation weights
+    const hueWeight = hue - lowHue;
+    const chromaWeight = (chroma - lowChroma) / chromaStep;
+    
+    // interpolate validMinV
+    const minV00 = r00[0], minV10 = r10[0], minV01 = r01[0], minV11 = r11[0];
+    let validMinV = null;
+    
+    if (minV00 !== null && minV10 !== null && minV01 !== null && minV11 !== null) {
+      const minV0 = minV00 * (1 - hueWeight) + minV10 * hueWeight;
+      const minV1 = minV01 * (1 - hueWeight) + minV11 * hueWeight;
+      validMinV = minV0 * (1 - chromaWeight) + minV1 * chromaWeight;
     }
+    
+    // interpolate validMaxV
+    const maxV00 = r00[1], maxV10 = r10[1], maxV01 = r01[1], maxV11 = r11[1];
+    let validMaxV = null;
+    
+    if (maxV00 !== null && maxV10 !== null && maxV01 !== null && maxV11 !== null) {
+      const maxV0 = maxV00 * (1 - hueWeight) + maxV10 * hueWeight;
+      const maxV1 = maxV01 * (1 - hueWeight) + maxV11 * hueWeight;
+      validMaxV = maxV0 * (1 - chromaWeight) + maxV1 * chromaWeight;
+    }
+    
+    return { validMinV, validMaxV };
+  }
 
-    // if no valid min or max was found, intentionally return null
+  // clamps valid value range to the min and max V specified for the mesh 
+  valueRange(h, c, minV, maxV) {
+
+    const { validMinV, validMaxV } = this.getValueRange(h, c);
+    
     return {
-      validMinV,
-      validMaxV,
+      validMinV: clamp(validMinV, minV, maxV),
+      validMaxV: clamp(validMaxV, minV, maxV)
     };
   }
 
@@ -312,13 +346,13 @@ class Slicer {
     minH = (minH * 180) / Math.PI;
     maxH = (maxH * 180) / Math.PI;
     const hueSpan = maxH > minH ? maxH - minH : 360 - minH + maxH;
-    const numSteps = Math.floor(hueSpan / 9);
+    const numSteps = Math.floor(hueSpan / 4.5);
     const startH = Math.floor(minH / 9) * 9 + 9;
 
     const sequence = [minH];
     // for every h from minH to maxH in increments of 9 (the grid points)
     for (let i = 1; i < numSteps; i++) {
-      sequence.push((startH + i * 9) % 360);
+      sequence.push((startH + i * 4.5) % 360);
     }
     sequence.push(maxH);
 
@@ -419,7 +453,7 @@ function clamp(num, min, max) {
 }
 
 async function loadMaxChromaDict() {
-  const response = await fetch("max_chroma.json");
+  const response = await fetch("./assets/max_chroma.json");
   const data = await response.json();
 
   return Object.fromEntries(
@@ -427,6 +461,24 @@ async function loadMaxChromaDict() {
       parseFloat(h),
       Object.fromEntries(
         Object.entries(values).map(([v, chroma]) => [parseFloat(v), chroma])
+      ),
+    ])
+  );
+}
+
+async function loadChromaValueRanges() {
+  const response = await fetch("./assets/chroma_value_ranges.json");
+  const data = await response.json();
+
+  return Object.fromEntries(
+    Object.entries(data).map(([h, chromas]) => [
+      parseFloat(h),
+      Object.fromEntries(
+        Object.entries(chromas).map(([c, range]) => [
+          // normalize all chroma keys to strings with one decimal place
+          parseFloat(c).toFixed(1),
+          range
+        ])
       ),
     ])
   );
@@ -457,18 +509,18 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
       vertexIndices2[i] = null;
     }
   }
-  
+
   for (let i = 0; i < edge1.length - 1; i++) {
     const v00 = vertexIndices1[i];
     const v01 = vertexIndices1[i + 1];
     const v10 = vertexIndices2[i];
     const v11 = vertexIndices2[i + 1];
-    
+
     // skip if any vertex is null (mesh will be discontinuous)
     if (v00 === null || v01 === null || v10 === null || v11 === null) {
       continue;
     }
-    
+
     // create two triangles for this quad
     if (reverseWinding) {
       indices.push(v00, v10, v01);
@@ -487,21 +539,20 @@ function createGeometry(edge1, edge2, reverseWinding = false) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
-  
 }
 
-async function load3DTexture(filename, size) {
+async function load3DTexture(filename, x_size, y_size, z_size) {
   const response = await fetch(filename);
   if (!response.ok) {
     throw new Error(`Failed to load texture: ${response.statusText}`);
   }
 
   const arrayBuffer = await response.arrayBuffer();
-  const data = new Uint8Array(arrayBuffer);
+  const data = new Float32Array(arrayBuffer);
 
-  const texture = new THREE.Data3DTexture(data, size, size, size);
+  const texture = new THREE.Data3DTexture(data, x_size, y_size, z_size);
   texture.format = THREE.RGBAFormat;
-  texture.type = THREE.UnsignedByteType;
+  texture.type = THREE.FloatType;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;
