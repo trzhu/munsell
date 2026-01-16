@@ -170,10 +170,19 @@ class Slicer {
         this.uniforms.hueMax.value
       );
 
+      // if hue min = hue max, don't show the hue slices 
+      // (to prevent artefacts where they clip through value planes)
+      const hueDiff = Math.abs(this.uniforms.hueMin.value - this.uniforms.hueMax.value) % (2 * Math.PI);
+      const hideHueSlices = hueDiff === 0.0;
+
       // create geometry for each cut surface
       const surfaces = {
-        hueMinPlane: this.cutSurface("hue", false),
-        hueMaxPlane: this.cutSurface("hue", true),
+        // hueMinPlane: this.cutSurface("hue", false),
+        // hueMaxPlane: this.cutSurface("hue", true),
+        ...(hideHueSlices ? {} : {
+          hueMinPlane: this.cutSurface("hue", false),
+          hueMaxPlane: this.cutSurface("hue", true),
+        }),
         valueMinPlane: this.cutSurface("value", false, hueLoop),
         valueMaxPlane: this.cutSurface("value", true, hueLoop),
         chromaMinCyl: this.cutSurface("chroma", false, hueLoop),
