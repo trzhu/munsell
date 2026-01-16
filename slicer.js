@@ -22,11 +22,16 @@ class Slicer {
     this.shadersPromise = this.loadShaders();
     this.loadTextures();
 
-    // load max chroma dictionary from jsons
+    // load max chroma dictionary and value range data from jsons
     this.maxChromaPromise = loadMaxChromaDict();
     this.maxChroma = null;
     this.maxChromaPromise.then((data) => {
       this.maxChroma = data;
+    });
+    this.chromaValueRangesPromise = loadChromaValueRanges();
+    this.chromaValueRanges = null;
+    this.chromaValueRangesPromise.then((data) => {
+      this.chromaValueRanges = data;
     });
 
     // pointer for future cut surface material
@@ -263,7 +268,6 @@ class Slicer {
 
         // find valid value range for this hue at this chroma
         const { validMinV, validMaxV } = this.valueRange(h, c, minV, maxV);
-        // console.log("at hue = ", h, "minV, maxV found:", validMinV, validMaxV);
         const clampedMinV = clamp(minV, validMinV, validMaxV);
         const clampedMaxV = clamp(maxV, validMinV, validMaxV);
 
@@ -279,65 +283,62 @@ class Slicer {
   }
 
   // finds minimum and maximum value that is inside the volume at this chroma
-  // approach: first linearly march through the integers to find the min/max valid integer,
-  // then binary search to find the decimal point
-  valueRange(h, c, minV, maxV) {
-    const EPSILON = 0.001;
+  getValueRange(hue, chroma) {
+    const chromaStep = 0.5; // as used in the json
     
+    // find surrounding hue values (integers 0-359)
+    const lowHue = Math.floor(hue);
+    const highHue = (lowHue + 1) % 360;
+    
+    // find surrounding chroma values (0.0, 0.5, ... 37.5)
+    const lowChromaNum = Math.floor(chroma / chromaStep) * chromaStep;
+    const highChromaNum = lowChromaNum + chromaStep;
+    // convert to string with 1 decimal place to match the json
+    const lowChroma = lowChromaNum.toFixed(1);
+    const highChroma = highChromaNum.toFixed(1);
+    
+    // Get the 4 corner values for bilinear interpolation
+    const r00 = this.chromaValueRanges[lowHue]?.[lowChroma] || [null, null];
+    const r10 = this.chromaValueRanges[highHue]?.[lowChroma] || [null, null];
+    const r01 = this.chromaValueRanges[lowHue]?.[highChroma] || [null, null];
+    const r11 = this.chromaValueRanges[highHue]?.[highChroma] || [null, null];
+
+    // interpolation weights
+    const hueWeight = hue - lowHue;
+    const chromaWeight = (chroma - lowChroma) / chromaStep;
+    
+    // interpolate validMinV
+    const minV00 = r00[0], minV10 = r10[0], minV01 = r01[0], minV11 = r11[0];
     let validMinV = null;
-    let validMaxV = null;
     
-    let intMinV = Math.floor(minV);
-    let intMaxV = Math.ceil(maxV);
-    
-    while (intMinV <= intMaxV && validMinV === null) {
-      const maxChromaLeft = this.getMaxChroma(h, intMinV);
-      if (c <= maxChromaLeft) {
-        // found first valid integer! Now binary search for exact transition point
-        let left = Math.max(minV, intMinV - 1);
-        let right = intMinV;
-        
-        while (right - left > EPSILON) {
-          const mid = (left + right) / 2;
-          const maxChromaAtMid = this.getMaxChroma(h, mid);
-          
-          if (c <= maxChromaAtMid) {
-            right = mid; // valid, search lower
-          } else {
-            left = mid; // invalid, search higher
-          }
-        }
-        validMinV = right;
-      } else {
-        intMinV++; // march by step of 1.0
-      }
+    if (minV00 !== null && minV10 !== null && minV01 !== null && minV11 !== null) {
+      const minV0 = minV00 * (1 - hueWeight) + minV10 * hueWeight;
+      const minV1 = minV01 * (1 - hueWeight) + minV11 * hueWeight;
+      validMinV = minV0 * (1 - chromaWeight) + minV1 * chromaWeight;
     }
     
-    // find validMaxV - march downward by 1.0 to find last valid integer
-    while (intMaxV >= Math.floor(minV) && validMaxV === null) {
-      const maxChromaRight = this.getMaxChroma(h, intMaxV);
-      if (c <= maxChromaRight) {
-        // found last valid integer! now binary search
-        let left = intMaxV;
-        let right = Math.min(maxV, intMaxV + 1);
-        
-        while (right - left > EPSILON) {
-          const mid = (left + right) / 2;
-          const maxChromaAtMid = this.getMaxChroma(h, mid);
-          
-          if (c <= maxChromaAtMid) {
-            left = mid;
-          } else {
-            right = mid;
-          }
-        }
-        validMaxV = left;
-      } else {
-        intMaxV--; //march downwards by step of 1.0
-      }
+    // interpolate validMaxV
+    const maxV00 = r00[1], maxV10 = r10[1], maxV01 = r01[1], maxV11 = r11[1];
+    let validMaxV = null;
+    
+    if (maxV00 !== null && maxV10 !== null && maxV01 !== null && maxV11 !== null) {
+      const maxV0 = maxV00 * (1 - hueWeight) + maxV10 * hueWeight;
+      const maxV1 = maxV01 * (1 - hueWeight) + maxV11 * hueWeight;
+      validMaxV = maxV0 * (1 - chromaWeight) + maxV1 * chromaWeight;
     }
     
     return { validMinV, validMaxV };
+  }
+
+  // clamps valid value range to the min and max V specified for the mesh 
+  valueRange(h, c, minV, maxV) {
+
+    const { validMinV, validMaxV } = this.getValueRange(h, c);
+    
+    return {
+      validMinV: clamp(validMinV, minV, maxV),
+      validMaxV: clamp(validMaxV, minV, maxV)
+    };
   }
 
   hueLoop(minH, maxH) {
@@ -460,6 +461,24 @@ async function loadMaxChromaDict() {
       parseFloat(h),
       Object.fromEntries(
         Object.entries(values).map(([v, chroma]) => [parseFloat(v), chroma])
+      ),
+    ])
+  );
+}
+
+async function loadChromaValueRanges() {
+  const response = await fetch("chroma_value_ranges.json");
+  const data = await response.json();
+
+  return Object.fromEntries(
+    Object.entries(data).map(([h, chromas]) => [
+      parseFloat(h),
+      Object.fromEntries(
+        Object.entries(chromas).map(([c, range]) => [
+          // normalize all chroma keys to strings with one decimal place
+          parseFloat(c).toFixed(1),
+          range
+        ])
       ),
     ])
   );
