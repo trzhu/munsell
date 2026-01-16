@@ -30,7 +30,7 @@ def texture_preprocess(df, max_chroma=38):
     
     return df_extended
 
-def to_3d_texture(df, h_res=256, v_res=128, c_res=128):
+def to_3d_texture(df, h_res=128, v_res=32, c_res=64):
     # duplicate grays, wrap hue, extend chroma
     df_extended = texture_preprocess(df)
     
