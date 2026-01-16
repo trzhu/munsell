@@ -77,7 +77,7 @@ class Slicer {
 
   async loadTextures() {
     // dimensions should be in chroma, value, hue order
-    const texture3D = await load3DTexture("../assets/munsell_texture.raw", 64, 32, 128);
+    const texture3D = await load3DTexture("./assets/munsell_texture.raw", 64, 32, 128);
     this.uniforms.interiorTexture.value = texture3D;
   }
 
