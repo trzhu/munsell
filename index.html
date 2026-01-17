@@ -125,7 +125,6 @@
         transform: translate(-50%, -50%) scale(1.1);
       }
 
-      /* TODO: make this match the selected color */
       .handle.active {
         background: #aaa;
         transform: translate(-50%, -50%) scale(1.2);
@@ -191,12 +190,19 @@
         background: #ccc;
       }
 
-      #about-munsell-color {
-        padding-left: 4rem;
+      #bottom-half {
         min-height: 50vh;
         background: #f0f0f0;
         margin: 0;
         overflow: auto;
+      }
+
+      #body {
+        padding-left: 4rem;
+        padding-right: 4rem;
+        margin: 0 auto;
+        overflow: auto;
+        max-width: 1300px;
       }
 
       h1,
@@ -310,191 +316,201 @@
     </div>
 
     <!-- Scrollable Bottom Half -->
-    <div id="about-munsell-color">
-      <h1>Munsell Color Space Explorer</h1>
+    <div id="bottom-half">
+      <div id="body">
+        <h1>Munsell Color Space Explorer</h1>
 
-      <p>Drag to pan the camera! Play with the sliders to explore!</p>
+        <p>Drag to pan the camera! Play with the sliders to explore! 
+          Scroll down for fun facts.
+        </p>
 
-      <h2>Quick Definitions</h2>
-      <ul>
-        <li><strong>Hue</strong> = color (red, orange, green, blue, etc.)</li>
-        <li><strong>Value</strong> = lightness or darkness</li>
-        <li>
-          <strong>Chroma</strong> = intensity, vividness (<a
-            href="#chroma-vs-saturation"
-            >how does this differ from saturation?</a
-          >)
-        </li>
-      </ul>
+        <h2>Quick Definitions</h2>
+        <ul>
+          <li><strong>Hue</strong> = color (red, orange, green, blue, etc.)</li>
+          <li><strong>Value</strong> = lightness or darkness</li>
+          <li>
+            <strong>Chroma</strong> = intensity, vividness (<a
+              href="#chroma-vs-saturation"
+              >how does this differ from saturation?</a
+            >)
+          </li>
+        </ul>
 
-      In the Munsell color system, hues are arranged around the circle like pie
-      slices. Value is arranged vertically, so each horizontal "plate" has the
-      same value. And chroma is arranged with the lowest chromas--grays--in the
-      center. Slices of equal chroma look like concentric cylinders.
+        In the Munsell color system, hues are arranged around the circle like
+        pie slices. Value is arranged vertically, so each horizontal "plate" has
+        the same value. And chroma is arranged with the lowest
+        chromas--grays--in the center. Slices of equal chroma look like
+        concentric cylinders.
 
-      <h2>About the Munsell Color Space</h2>
-      <p>
-        Albert H. Munsell (1858–1918) was an artist and scientist seeking to
-        quantize color space in a perceptually uniform way. He began working on
-        his system in 1898 and published it in 1905, although research and
-        revisions continued after his death.
-      </p>
+        <h2>About the Munsell Color Space</h2>
+        <p>
+          Albert H. Munsell (1858–1918) was an artist and scientist seeking to
+          quantize color space in a perceptually uniform way. He began working
+          on his system in 1898 and published it in 1905, although research and
+          revisions continued after his death.
+        </p>
 
-      <p>
-        For this tool I used the 1943 renotations published by the Optical
-        Society of America, which built on his work with extensive experimental
-        data. The dataset is available
-        <a
-          href="https://www.rit.edu/science/munsell-color-science-lab-educational-resources#munsell-renotation-data"
-          target="_blank"
-          >here (real.dat)</a
-        >
-        via the Rochester Institute of Technology.
-      </p>
+        <p>
+          For this tool I used the 1943 renotations published by the Optical
+          Society of America, which built on his work with extensive
+          experimental data. The dataset is available
+          <a
+            href="https://www.rit.edu/science/munsell-color-science-lab-educational-resources#munsell-renotation-data"
+            target="_blank"
+            >here (real.dat)</a
+          >
+          via the Rochester Institute of Technology.
+        </p>
 
-      <p>
-        Munsell's work laid the foundation for much of color science as we know
-        it today. It is considered the first known attempt to create a
-        <em>perceptually uniform</em> color space, and the first to deduce that
-        the space of human color perception cannot fit a regular geometric
-        object (like a pyramid, cone, sphere, or cube).
-      </p>
+        <p>
+          Munsell's work laid the foundation for much of color science as we
+          know it today. It is considered the first known attempt to create a
+          <em>perceptually uniform</em> color space, and the first to deduce
+          that the space of human color perception cannot fit a regular
+          geometric object (like a pyramid, cone, sphere, or cube).
+        </p>
 
-      <p>
-        Because of Munsell's connection to the art community, it is still often
-        used by artists. Fun fact: the Munsell system is used in geology to
-        classify the color of soil.
-      </p>
+        <p>
+          Because of Munsell's connection to the art community, it is still
+          often used by artists. Fun fact: the Munsell system is used in geology
+          to classify the color of soil.
+        </p>
 
-      <h2 id="chroma-vs-saturation">
-        What's the Difference Between Chroma and Saturation?
-      </h2>
+        <h2 id="chroma-vs-saturation">
+          What's the Difference Between Chroma and Saturation?
+        </h2>
 
-      <p>
-        <strong>The short answer:</strong> Chroma means what you think
-        saturation means.
-      </p>
+        <p>
+          <strong>The short answer:</strong> Chroma means what you think
+          saturation means.
+        </p>
 
-      <p>
-        <strong>The long answer:</strong> Chroma is measured relative to gray of
-        the same value. Saturation is defined relative to white: adding black
-        does not lower saturation, but adding white or gray does.
-      </p>
+        <p>
+          <strong>The long answer:</strong> Chroma is measured relative to gray
+          of the same value. Saturation is defined relative to white: adding
+          black does not lower saturation, but adding white or gray does.
+        </p>
 
-      <p>
-        Why this definition? Consider a monochromatic light source in an
-        otherwise dark room. If you turn the light down a bit, the vibrancy of
-        the color decreases, but it is still a pure-colored light source, not
-        muddied by other wavelengths. You could say its saturation has not
-        changed. Now turn on a white light. The light in the room is no longer a
-        “pure” color, and this loss of vibrancy is different from simply dimming
-        the original light.
-      </p>
+        <p>
+          Why this definition? Consider a monochromatic light source in an
+          otherwise dark room. If you turn the light down a bit, the vibrancy of
+          the color decreases, but it is still a pure-colored light source, not
+          muddied by other wavelengths. You could say its saturation has not
+          changed. Now turn on a white light. The light in the room is no longer
+          a “pure” color, and this loss of vibrancy is different from simply
+          dimming the original light.
+        </p>
 
-      <p>
-        In the Munsell color space,
-        <strong>lines of equal chroma are vertical</strong>, and
-        <strong>lines of equal saturation are diagonal</strong>.
-      </p>
+        <p>
+          In the Munsell color space,
+          <strong>lines of equal chroma are vertical</strong>, and
+          <strong>lines of equal saturation are diagonal</strong>.
+        </p>
 
-      <figure>
-        <img
-          src="./assets/chromavssaturation.jpg"
-          alt="Chroma vs saturation in the Munsell color space"
-        />
-        <figcaption>
-          Image source:
-          <a href="http://www.huevaluechroma.com/121.php" target="_blank">
-            huevaluechroma.com
-          </a>
-        </figcaption>
-      </figure>
+        <figure>
+          <img
+            src="./assets/chromavssaturation.jpg"
+            alt="Chroma vs saturation in the Munsell color space"
+          />
+          <figcaption>
+            Image source:
+            <a href="http://www.huevaluechroma.com/121.php" target="_blank">
+              huevaluechroma.com
+            </a>
+          </figcaption>
+        </figure>
 
-      Personally I think chroma is usually a more useful concept for painters.
+        Personally I think chroma is usually a more useful concept for painters.
 
-      <h2>Caveats</h2>
-      <p>
-        Munsell didn't specify any particular spacing along the vertical axis,
-        nor did his dataset include white, black, or grayscale colors. I added
-        grayscales by averaging luminance values across each horizontal “plate,”
-        then tacked white and black onto the top and bottom. Thus the y-axis
-        scale is completely arbitrary.
-      </p>
+        <h2>Notes/Caveats</h2>
+        <p>
+          Munsell didn't specify any particular spacing along the vertical axis,
+          nor did his dataset include white, black, or grayscale colors. I added
+          grayscales by averaging luminance values across each horizontal
+          “plate,” then tacked white and black onto the top and bottom. Thus the
+          y-axis scale is completely arbitrary.
+        </p>
 
-      <p>
-        Note the visualization labelled "point cloud" is the original dataset,
-        and both the dense point cloud and volume views have interpolated points
-        added to it. To obtain colors in between the original data points, I
-        linearly interpolated in La*b* color space.
-      </p>
+        <p>
+          Note the visualization labelled "point cloud" is the original dataset,
+          and both the dense point cloud and volume views have interpolated
+          points added to it. To obtain colors in between the original data
+          points, I linearly interpolated in La*b* color space. I used the
+          library
+          <a href="https://www.colour-science.org/" target="_blank">colour</a>
+          for python for all colorspace conversions.
+        </p>
 
-      <p>
-        You may notice that towards the outer edges (higher chromas) it looks
-        like the colors aren't changing. Due to the limitations of RGB screens,
-        many of the most chromatic colors can't be accurately displayed on a
-        screen. You can see just how bad the clamping is by clicking "Clip to
-        RGB limits" in the point cloud visualization. (A game I like to play
-        with myself is to spot colors that are outside of the RGB gamut! I've
-        appreciated a lot of brightly-colored flowers because of it.)
-      </p>
+        <p>
+          You may notice that towards the outer edges (higher chromas) it looks
+          like the colors aren't changing. Due to the limitations of RGB
+          screens, many of the most chromatic colors can't be accurately
+          displayed on a screen. You can see just how bad the clamping is by
+          clicking "Clip to RGB limits" in the point cloud visualization. (A
+          game I like to play with myself is to spot colors that are outside of
+          the RGB gamut! I've appreciated a lot of brightly-colored flowers
+          because of it.)
+        </p>
 
-      <p>
-        This website doesn't have color picker functionality. If you want a
-        perceptually uniform color picker, such as for digital art, I recommend
-        <a href="https://oklch.com/" target="_blank">OKLCH</a>.
-      </p>
+        <p>
+          This website doesn't have color picker functionality. If you want a
+          perceptually uniform color picker, such as for digital art, I
+          recommend
+          <a href="https://oklch.com/" target="_blank">OKLCH</a>.
+        </p>
 
-      <p class="note">
-        All errors are my own. If you notice a major error or have a question,
-        shoot me an
-        <a href="mailto:trzhu@berkeley.edu?subject=Munsell">email</a>
-        (please put “Munsell” in the subject line).
-      </p>
+        <p class="note">
+          All errors are my own. If you notice a major error or have a question,
+          shoot me an
+          <a href="mailto:trzhu@berkeley.edu?subject=Munsell">email</a>
+          (please put “Munsell” in the subject line).
+        </p>
 
-      <h2>Acknowledgements</h2>
-      <p>
-        A very deep thank you to Andrew Geng (pteromys), whose own Munsell color
-        explorer inspired me to make this one:
-        <a href="https://pteromys.melonisland.net/munsell/" target="_blank"
-          >pteromys Munsell Color Palette</a
-        >.
-      </p>
-      <p>
-        Thank you to
-        <a href="https://james.fong.page/" target="_blank">James Fong</a> for
-        being super cool and helpful and answering all my questions.
-      </p>
-
-      <h2>Further Reading</h2>
-      <p>Here are some more sites you might find interesting.</p>
-      <ul>
-        <li>
+        <h2>Acknowledgements</h2>
+        <p>
+          A very deep thank you to Andrew Geng (pteromys), whose own Munsell
+          color explorer inspired me to make this one:
           <a href="https://pteromys.melonisland.net/munsell/" target="_blank"
-            >pteromys.melonisland.net/munsell/</a
-          >: A different way to explore the Munsell color space. You can only
-          see one hue, value, and chroma slice at a time. How do you relate the
-          chroma slice diagram on the right with the 3d model? Imagine taking a
-          chroma "cylinder", tying a drawstring around one end and pulling it
-          closed, then looking down from the top.
-          <br />
-        </li>
-        <li>
-          <a href="https://oklch.com/" target="_blank">https://oklch.com/</a>:
-          OKLCH — a perceptually uniform color space for modern web design.
-        </li>
-        <li>
-          <a href="https://munsell.com/about-munsell-color/" target="_blank"
-            >munsell.com/about-munsell-color/</a
-          >: The Munsell color company, which Albert Munsell founded in 1917
-          (and is still going).
-        </li>
-      </ul>
+            >pteromys Munsell Color Palette</a
+          >.
+        </p>
+        <p>
+          Thank you to
+          <a href="https://james.fong.page/" target="_blank">James Fong</a> for
+          being super cool and helpful and answering all my questions.
+        </p>
 
-      <p>
-        <a href="https://github.com/trzhu/munsell" target="_blank">
-          Source code
-        </a>
-      </p>
+        <h2>Further Reading</h2>
+        <p>Here are some more sites you might find interesting.</p>
+        <ul>
+          <li>
+            <a href="https://pteromys.melonisland.net/munsell/" target="_blank"
+              >pteromys.melonisland.net/munsell/</a
+            >: A different way to explore the Munsell color space. You can only
+            see one hue, value, and chroma slice at a time. How do you relate
+            the chroma slice diagram on the right with the 3d model? Imagine
+            taking a chroma "cylinder", tying a drawstring around one end and
+            pulling it closed, then looking down from the top.
+            <br />
+          </li>
+          <li>
+            <a href="https://oklch.com/" target="_blank">https://oklch.com/</a>:
+            OKLCH — a perceptually uniform color space for modern web design.
+          </li>
+          <li>
+            <a href="https://munsell.com/about-munsell-color/" target="_blank"
+              >munsell.com/about-munsell-color/</a
+            >: The Munsell color company, which Albert Munsell founded in 1917
+            (and is still going).
+          </li>
+        </ul>
+
+        <p>
+          <a href="https://github.com/trzhu/munsell" target="_blank">
+            Source code
+          </a>
+        </p>
+      </div>
     </div>
 
     <script type="module" src="./js/main.js"></script>
