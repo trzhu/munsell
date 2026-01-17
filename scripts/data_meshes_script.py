@@ -6,7 +6,7 @@ import math
 from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
 from collections import defaultdict
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import LinearNDInterpolator, RegularGridInterpolator
 
 # 4 was chosen arbitrarily
 Y_SCALE = 4
@@ -568,13 +568,6 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
     return df_result
 
 
-def to_smooth_mesh(df):
-    df = shell_interpolate(df)
-    df = filter_exterior(df)
-    df = to_3d_coordinates(df)
-    
-    # return value: vertices, faces
-    return to_mesh(df)
 
 def write_ply(vertices, faces, filename):
     with open(filename, "w") as f:
@@ -623,28 +616,44 @@ def write_json(dictionary):
     print("wrote to max_chroma.json")
 
 # point cloud of only original dataset
-def to_pointcloud_original():
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+def to_pointcloud_original(df_processed):
     df_3d = to_3d_coordinates(df_processed)
     
     vertices = to_pointcloud(df_3d)
-    write_ply(vertices, [], "munsell_pointcloud_original.ply")
+    write_ply(vertices, [], "./assets/munsell_pointcloud_original.ply")
 
-def to_pointcloud_interpolated():
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+def to_pointcloud_interpolated(df_processed):
     df_interpolated = grid_interpolate(df_processed)
     df_3d = to_3d_coordinates(df_interpolated)
     
     vertices = to_pointcloud(df_3d)
-    write_ply(vertices, [], "munsell_pointcloud_interpolated.ply")
+    write_ply(vertices, [], "./assets/munsell_pointcloud_interpolated.ply")
+
+def to_shell_mesh(df):
+    df = shell_interpolate(df)
+    df = filter_exterior(df)
+    df = to_3d_coordinates(df)
+    
+    vertices, faces = to_mesh(df)
+    write_ply(vertices, faces, "./assets/munsell_mesh.ply")
 
 def main():
-    # to_pointcloud_original()
-    # to_pointcloud_interpolated()
+    # load and process data
+    input_url = "https://www.rit-mcsl.org/MunsellRenotation/real.dat"
+    df_raw = load_munsell_dat(input_url)
+
+    df_processed = process(df_raw)
+    df_processed.to_csv("./assets/munsell_parsed.csv", index=False)
+    print("saved to munsell_parsed.csv")
     
     df_processed = pd.read_csv("./assets/munsell_parsed.csv", index_col=False)
-    vertices, faces = to_smooth_mesh(df_processed)
-    write_ply(vertices, faces, "./assets/munsell_mesh.ply")
+    
+    # create point clouds with original dataset + denser interpolated version
+    to_pointcloud_original(df_processed)
+    to_pointcloud_interpolated(df_processed)
+    
+    # create shell mesh
+    to_shell_mesh(df_processed)
     
     print(":)")
 

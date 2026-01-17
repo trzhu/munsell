@@ -1,7 +1,7 @@
 import json
 
 # Load existing max_chroma data
-with open('max_chroma.json', 'r') as f:
+with open("./assets/max_chroma.json", "r") as f:
     max_chroma = json.load(f)
 
 def get_max_chroma(hue, value):
@@ -113,7 +113,7 @@ for hue in range(360):
         # store as tuple [minV, maxV], with None values preserved
         value_ranges[hue][chroma] = [min_v, max_v]
 
-with open('chroma_value_ranges.json', 'w') as f:
+with open("./assets/chroma_value_ranges.json", "w") as f:
     json.dump(value_ranges, f, indent=2)
 
 print("saved to chroma_value_ranges.json")
