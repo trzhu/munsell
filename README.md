@@ -7,16 +7,14 @@ I LOVE [Pteromys' Munsell Color Palette](https://pteromys.melonisland.net/munsel
 The point cloud is the original real.dat dataset with white and black added, arranged in 3d space. Note that the scale of the vertical axis was chosen arbitrarily and doesn't necessarily preserve perceptual "distance."
 
 For the dense point cloud, I added new points in line with the existing (hue, value) grid,
-and then determined their colours by linearly interpolating in Lab colourspace. I clamped the length of each "spoke" to a length also linearly interpolated from its neighbours. 
+and then determined their colours by linearly interpolating in Lab colourspace. I clamped the length of each "spoke" to a length also bilinearly interpolated from its neighbours. 
 
-The mesh was a little more complicated. It turns out naively connecting the exterior data points, or even doing so with a bit of interpolating first, creates a super lumpy mesh full of awful wrinkles and visible faceting. When splitting a quad into triangles, I choose the shorter diagonal to hopefully make the surface smoother. Still working on ways to generate a smoother mesh without compromising on accurately reprsentating the original data.  
+The surface of the mesh is similarly bilerped. When splitting a quad into triangles, I choose the shorter diagonal to hopefully make the surface smoother. I was a little disappointed by how "wrinkly" it looks, especially near the white pole, but I suppose that's the best I can do given the relatively sparse and discrete dataset.
 
 The interior cut surface geometry is constructed in real time. I load in some lookup tables from jsons to help with this. 
 
 I generated a 3D texture to colour the cut surfaces. Then, I project it to the mesh
 using cylindrical coordinates, with lets me maintain the full hue resolution in the centre. 
-
-Currently working on: remaking the mesh to be less lumpy.
 
 Something I would love to add is:
 - a colour swatch picker
