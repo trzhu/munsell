@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>The Munsell Colour Space</title>
+    <title>The Munsell color Space</title>
     <style>
       * {
         box-sizing: border-box;
@@ -125,7 +125,7 @@
         transform: translate(-50%, -50%) scale(1.1);
       }
 
-      /* TODO: make this match the selected colour */
+      /* TODO: make this match the selected color */
       .handle.active {
         background: #aaa;
         transform: translate(-50%, -50%) scale(1.2);
@@ -303,18 +303,9 @@
 
       <p>Drag to pan the camera! Play with the sliders to explore!</p>
 
-      <p>
-        <strong>
-          I'm currently working on a version that lets you visualize it as a
-          mesh</strong
-        >! It's hard because I want to let you intersect it at any hue, value,
-        or chroma points you want without pre-generating tens of thousands of
-        faces.
-      </p>
-
       <h2>Quick Definitions</h2>
       <ul>
-        <li><strong>Hue</strong> = colour (red, orange, green, blue, etc.)</li>
+        <li><strong>Hue</strong> = color (red, orange, green, blue, etc.)</li>
         <li><strong>Value</strong> = lightness or darkness</li>
         <li>
           <strong>Chroma</strong> = intensity, vividness (<a
@@ -324,10 +315,15 @@
         </li>
       </ul>
 
+      In the Munsell color system, hues are arranged around the circle like pie slices. 
+      Value is arranged vertically, so each horizontal "plate" has the same value. 
+      And chroma is arranged with the lowest chromas--grays--in the center. Slices of equal
+      chroma look like concentric cylinders. 
+
       <h2>About the Munsell Color Space</h2>
       <p>
         Albert H. Munsell (1858–1918) was an artist and scientist seeking to
-        quantize colour space in a perceptually uniform way. He began working on
+        quantize color space in a perceptually uniform way. He began working on
         his system in 1898 and published it in 1905, although research and
         revisions continued after his death.
       </p>
@@ -345,18 +341,18 @@
       </p>
 
       <p>
-        Munsell's work laid the foundation for much of colour science as we know
+        Munsell's work laid the foundation for much of color science as we know
         it today. It is considered the first known attempt to create a
-        <em>perceptually uniform</em> colour space, and the first to deduce that
-        the space of human colour perception cannot fit a regular geometric
+        <em>perceptually uniform</em> color space, and the first to deduce that
+        the space of human color perception cannot fit a regular geometric
         object (like a pyramid, cone, sphere, or cube).
       </p>
 
       <p>
         Because of Munsell's connection to the art community, it is still often
         used by artists.
-        <strong>Fun fact:</strong> the Munsell system is used in geology to
-        classify the colour of soil.
+        Fun fact: the Munsell system is used in geology to
+        classify the color of soil.
       </p>
 
       <h2 id="chroma-vs-saturation">
@@ -377,15 +373,15 @@
       <p>
         Why this definition? Consider a monochromatic light source in an
         otherwise dark room. If you turn the light down a bit, the vibrancy of
-        the colour decreases, but it is still a pure-coloured light source, not
+        the color decreases, but it is still a pure-colored light source, not
         muddied by other wavelengths. You could say its saturation has not
         changed. Now turn on a white light. The light in the room is no longer a
-        “pure” colour, and this loss of vibrancy is different from simply
+        “pure” color, and this loss of vibrancy is different from simply
         dimming the original light.
       </p>
 
       <p>
-        In the Munsell colour space,
+        In the Munsell color space,
         <strong>lines of equal chroma are vertical</strong>, and
         <strong>lines of equal saturation are diagonal</strong>.
       </p>
@@ -403,18 +399,39 @@
         </figcaption>
       </figure>
 
+      Personally I think chroma is usually a more useful concept for painters. 
+
       <h2>Caveats</h2>
       <p>
         Munsell didn't specify any particular spacing along the vertical axis,
-        nor did his dataset include white, black, or grayscale colours. I added
+        nor did his dataset include white, black, or grayscale colors. I added
         grayscales by averaging luminance values across each horizontal “plate,”
         then tacked white and black onto the top and bottom. Thus the y-axis
         scale is completely arbitrary.
       </p>
 
       <p>
-        To obtain colours in between the original data points, I linearly
-        interpolated in Lab colour space.
+        Note the visualization labelled "point cloud" is the original dataset, 
+        and both the dense point cloud and volume views have interpolated points added to it.
+        To obtain colors in between the original data points, I linearly
+        interpolated in La*b* color space.
+      </p>
+
+      <p>
+        You may notice that towards the outer edges (higher chromas) 
+        it looks like the colors aren't changing. Due to the limitations
+        of RGB screens, many of the most chromatic colors can't be 
+        accurately displayed on a screen. You can see just how bad the clamping is
+        by clicking "Clip to RGB limits" in the point cloud visualization. 
+        (A game I like to play with myself is to spot colors that are 
+        outside of the RGB gamut! I've appreciated a lot of brightly-colored 
+        flowers because of it.)
+      </p>
+
+      <p>
+        This website doesn't have color picker functionality. If you want a 
+        perceptually uniform color picker, such as for digital art, I recommend
+        <a href="https://oklch.com/" target="_blank">OKLCH</a>.
       </p>
 
       <p class="note">
@@ -427,7 +444,7 @@
       <h2>Acknowledgements</h2>
       <p>
         A very deep thank you to Andrew Geng (pteromys), whose own Munsell
-        colour explorer inspired me to make this one:
+        color explorer inspired me to make this one:
         <a href="https://pteromys.melonisland.net/munsell/" target="_blank"
           >pteromys Munsell Color Palette</a
         >.
@@ -444,7 +461,7 @@
         <li>
           <a href="https://pteromys.melonisland.net/munsell/" target="_blank"
             >pteromys.melonisland.net/munsell/</a
-          >: A different way to explore the Munsell colour space. You can only
+          >: A different way to explore the Munsell color space. You can only
           see one hue, value, and chroma slice at a time. How do you relate the
           chroma slice diagram on the right with the 3d model? Imagine taking a
           chroma "cylinder", tying a drawstring around one end and pulling it
@@ -453,7 +470,7 @@
         </li>
         <li>
           <a href="https://oklch.com/" target="_blank">https://oklch.com/</a>:
-          OKLCH — a perceptually uniform colour space for modern web design.
+          OKLCH — a perceptually uniform color space for modern web design.
         </li>
         <li>
           <a href="https://munsell.com/about-munsell-color/" target="_blank"
