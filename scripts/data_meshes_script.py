@@ -6,7 +6,7 @@ import math
 from colour import CCS_ILLUMINANTS, xyY_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, Lab_to_XYZ, XYZ_to_xyY
 from itertools import pairwise
 from collections import defaultdict
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import RegularGridInterpolator
 
 # 4 was chosen arbitrarily
 Y_SCALE = 4
@@ -467,14 +467,21 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
         
     write_json(max_chroma)
     
-    # build max_chroma interpolator from original data
-    # interpolates linearly on triangle faces
-    max_chroma_points = np.array([[h, v, c] for (h, v), c in max_chroma.items()])
-    max_chroma_interp = LinearNDInterpolator(
-        # input (h, v)
-        max_chroma_points[:, :2],
-        # output max chroma
-        max_chroma_points[:, 2]
+    # 2d grid of chroma values 
+    hue_grid = np.arange(0, 360, 9)  # 0, 9, 18, ..., 351
+    value_grid = np.arange(0, 11, 1)  # 0, 1, 2, ..., 10
+    chroma_grid = np.zeros((len(hue_grid), len(value_grid)))
+    for i, h in enumerate(hue_grid):
+        for j, v in enumerate(value_grid):
+            chroma_grid[i, j] = max_chroma.get((h, v), 0.0)
+    
+    # bilerp
+    max_chroma_interp = RegularGridInterpolator(
+        (hue_grid, value_grid), 
+        chroma_grid,
+        method='linear',
+        bounds_error=False,
+        fill_value=0.0
     )
     
     # original hue/value/chroma spacing is 9, 1, 2
@@ -491,8 +498,8 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
 
     query_hv = np.array(query_hv)
 
-    # Get max chroma at all query points
-    query_chromas = np.array([max_chroma_interp(h, v) for h, v in query_hv])
+    # get max chroma at all query points
+    query_chromas = max_chroma_interp(query_hv)
 
     # Filter out invalid chromas
     valid_chroma_mask = ~(np.isnan(query_chromas) | (query_chromas <= 0))
@@ -535,8 +542,8 @@ def shell_interpolate(df, hue_steps = 2, value_steps = 3):
         "flagged_to_drop": False
     })
     
-    # delaunay triangulation filters out white and black because chroma = 0
-    # add black and white manually
+    # black and white get filtered out because chroma = 0
+    # add them back manually
     bw = pd.DataFrame({
         "HueDeg": [0.0, 0.0],
         "Value": [0.0, 10.0],
@@ -610,7 +617,7 @@ def write_json(dictionary):
             nested_dict[hue] = {}
         nested_dict[hue][value] = chroma
     
-    with open('max_chroma.json', 'w') as f:
+    with open('./assets/max_chroma.json', 'w') as f:
         json.dump(nested_dict, f, indent=2)
     
     print("wrote to max_chroma.json")
@@ -635,9 +642,9 @@ def main():
     # to_pointcloud_original()
     # to_pointcloud_interpolated()
     
-    df_processed = pd.read_csv("munsell_parsed.csv", index_col=False)
+    df_processed = pd.read_csv("./assets/munsell_parsed.csv", index_col=False)
     vertices, faces = to_smooth_mesh(df_processed)
-    write_ply(vertices, faces, "munsell_mesh.ply")
+    write_ply(vertices, faces, "./assets/munsell_mesh.ply")
     
     print(":)")
 
