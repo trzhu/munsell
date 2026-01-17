@@ -646,7 +646,7 @@ def main():
     df_processed.to_csv("./assets/munsell_parsed.csv", index=False)
     print("saved to munsell_parsed.csv")
     
-    df_processed = pd.read_csv("./assets/munsell_parsed.csv", index_col=False)
+    # df_processed = pd.read_csv("./assets/munsell_parsed.csv", index_col=False)
     
     # create point clouds with original dataset + denser interpolated version
     to_pointcloud_original(df_processed)
