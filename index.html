@@ -239,6 +239,18 @@
           </select>
         </div>
 
+        <details id="point-size" open>
+          <summary>Point Size</summary>
+          <input
+            type="range"
+            id="point-size-slider"
+            min="1"
+            max="30"
+            step="1"
+            value="10"
+          />
+        </details>
+
         <!-- toggle lighting button -->
         <button id="toggle-light">Turn on Lighting</button>
 
@@ -315,10 +327,10 @@
         </li>
       </ul>
 
-      In the Munsell color system, hues are arranged around the circle like pie slices. 
-      Value is arranged vertically, so each horizontal "plate" has the same value. 
-      And chroma is arranged with the lowest chromas--grays--in the center. Slices of equal
-      chroma look like concentric cylinders. 
+      In the Munsell color system, hues are arranged around the circle like pie
+      slices. Value is arranged vertically, so each horizontal "plate" has the
+      same value. And chroma is arranged with the lowest chromas--grays--in the
+      center. Slices of equal chroma look like concentric cylinders.
 
       <h2>About the Munsell Color Space</h2>
       <p>
@@ -350,8 +362,7 @@
 
       <p>
         Because of Munsell's connection to the art community, it is still often
-        used by artists.
-        Fun fact: the Munsell system is used in geology to
+        used by artists. Fun fact: the Munsell system is used in geology to
         classify the color of soil.
       </p>
 
@@ -376,8 +387,8 @@
         the color decreases, but it is still a pure-colored light source, not
         muddied by other wavelengths. You could say its saturation has not
         changed. Now turn on a white light. The light in the room is no longer a
-        “pure” color, and this loss of vibrancy is different from simply
-        dimming the original light.
+        “pure” color, and this loss of vibrancy is different from simply dimming
+        the original light.
       </p>
 
       <p>
@@ -399,7 +410,7 @@
         </figcaption>
       </figure>
 
-      Personally I think chroma is usually a more useful concept for painters. 
+      Personally I think chroma is usually a more useful concept for painters.
 
       <h2>Caveats</h2>
       <p>
@@ -411,25 +422,24 @@
       </p>
 
       <p>
-        Note the visualization labelled "point cloud" is the original dataset, 
-        and both the dense point cloud and volume views have interpolated points added to it.
-        To obtain colors in between the original data points, I linearly
-        interpolated in La*b* color space.
+        Note the visualization labelled "point cloud" is the original dataset,
+        and both the dense point cloud and volume views have interpolated points
+        added to it. To obtain colors in between the original data points, I
+        linearly interpolated in La*b* color space.
       </p>
 
       <p>
-        You may notice that towards the outer edges (higher chromas) 
-        it looks like the colors aren't changing. Due to the limitations
-        of RGB screens, many of the most chromatic colors can't be 
-        accurately displayed on a screen. You can see just how bad the clamping is
-        by clicking "Clip to RGB limits" in the point cloud visualization. 
-        (A game I like to play with myself is to spot colors that are 
-        outside of the RGB gamut! I've appreciated a lot of brightly-colored 
-        flowers because of it.)
+        You may notice that towards the outer edges (higher chromas) it looks
+        like the colors aren't changing. Due to the limitations of RGB screens,
+        many of the most chromatic colors can't be accurately displayed on a
+        screen. You can see just how bad the clamping is by clicking "Clip to
+        RGB limits" in the point cloud visualization. (A game I like to play
+        with myself is to spot colors that are outside of the RGB gamut! I've
+        appreciated a lot of brightly-colored flowers because of it.)
       </p>
 
       <p>
-        This website doesn't have color picker functionality. If you want a 
+        This website doesn't have color picker functionality. If you want a
         perceptually uniform color picker, such as for digital art, I recommend
         <a href="https://oklch.com/" target="_blank">OKLCH</a>.
       </p>
@@ -443,8 +453,8 @@
 
       <h2>Acknowledgements</h2>
       <p>
-        A very deep thank you to Andrew Geng (pteromys), whose own Munsell
-        color explorer inspired me to make this one:
+        A very deep thank you to Andrew Geng (pteromys), whose own Munsell color
+        explorer inspired me to make this one:
         <a href="https://pteromys.melonisland.net/munsell/" target="_blank"
           >pteromys Munsell Color Palette</a
         >.

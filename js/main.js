@@ -124,6 +124,13 @@ function initUI() {
     pauseButton.textContent = isPaused ? "Play Rotation" : "Pause Rotation";
   });
 
+  // point size button
+  const pointSizeSlider = document.getElementById("point-size-slider");
+  pointSizeSlider.addEventListener("input", () => {
+    const pointSize = Number(pointSizeSlider.value);
+    slicer.setPointSize(pointSize);
+  });
+
   // lighting toggle button
   const toggleLightButton = document.getElementById("toggle-light");
   toggleLightButton.addEventListener("click", () => {
@@ -204,14 +211,17 @@ function switchScene(sceneKey) {
 
   const toggleLightButton = document.getElementById("toggle-light");
   const toggleRGBButton = document.getElementById("toggle-rgb");
+  const pointSize = document.getElementById("point-size")
 
   if (sceneKey === "default") {
     toggleLightButton.style.display = "block";
     toggleRGBButton.style.display = "none";
+    pointSize.style.display = "none";
     updateCutSurfaces();
   } else if (sceneKey === "pointCloud" || sceneKey === "interpolated") {
     toggleLightButton.style.display = "none";
     toggleRGBButton.style.display = "block";
+    pointSize.style.display = "block";
   }
 }
 

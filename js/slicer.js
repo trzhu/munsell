@@ -140,6 +140,10 @@ class Slicer {
     this.createCutSurfaces();
   }
 
+  setPointSize(pointSize) {
+    this.uniforms.uSize.value = pointSize;
+  }
+
   toggleLighting() {
     this.uniforms.useLighting.value = 1 - this.uniforms.useLighting.value;
   }
