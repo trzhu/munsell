@@ -159,6 +159,12 @@ class CircularSlider {
     };
   }
 
+  setHueRange(start, end) {
+    this.angle1 = start;
+    this.angle2 = end;
+    this.updateDisplay();
+  }
+
   notifyChange() {
     if (this.onChange) {
       this.onChange(this.getHueRange());
@@ -250,6 +256,12 @@ class TwoHandleSlider {
 
   getValues() {
     return { start: this.value1, end: this.value2 };
+  }
+
+  setValues(start, end) {
+    this.value1 = start;
+    this.value2 = end;
+    this.updateDisplay();
   }
 
   setGradient(col1, col2) {

@@ -124,13 +124,6 @@ function initUI() {
     pauseButton.textContent = isPaused ? "Play Rotation" : "Pause Rotation";
   });
 
-  // point size button
-  const pointSizeSlider = document.getElementById("point-size-slider");
-  pointSizeSlider.addEventListener("input", () => {
-    const pointSize = Number(pointSizeSlider.value);
-    slicer.setPointSize(pointSize);
-  });
-
   // lighting toggle button
   const toggleLightButton = document.getElementById("toggle-light");
   toggleLightButton.addEventListener("click", () => {
@@ -153,6 +146,13 @@ function initUI() {
   });
 
   /********** SLIDERS ************/
+  // point size slider
+  const pointSizeSlider = document.getElementById("point-size-slider");
+  pointSizeSlider.addEventListener("input", () => {
+    const pointSize = Number(pointSizeSlider.value);
+    slicer.setPointSize(pointSize);
+  });
+
   // circular hue slider
   const circularHueSlider = new CircularSlider("hue-slider");
   circularHueSlider.onChange = (range) => {
@@ -178,6 +178,18 @@ function initUI() {
   // idk initalize it to some random colors
   chromaSlider.setGradient("#808080", "#ff0000");
   chromaSlider.onChange(chromaSlider.getValues());
+
+  /* RESET BUTTON */
+  document.getElementById("reset-sliders").addEventListener("click", () => {
+    circularHueSlider.setHueRange(0, 360);
+    circularHueSlider.onChange(circularHueSlider.getHueRange());
+
+    valueSlider.setValues(0, 10);
+    valueSlider.onChange(valueSlider.getValues());
+
+    chromaSlider.setValues(0, 38);
+    chromaSlider.onChange(chromaSlider.getValues());
+  });
 
   // set scene
   const sceneSelect = document.getElementById("sceneSelect");
@@ -443,7 +455,8 @@ function loadMeshes() {
       }
 
       if (loadedCount === totalMeshes) {
-        switchScene("default");
+        const sceneSelect = document.getElementById("sceneSelect");
+        switchScene(sceneSelect.value);
       }
     });
   });
