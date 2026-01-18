@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "OrbitControls";
 import { Slicer } from "./slicer.js";
-import { CircularSlider, TwoHandleSlider } from "./ui.js";
+import { CircularSlider, TwoHandleSlider, FloatingUI } from "./ui.js";
 
 // globals
 let scene, camera, renderer, controls;
@@ -80,41 +80,7 @@ function initScene() {
 
 function initUI() {
   //draggable floating ui box
-  const floatingUI = document.getElementById("floating-ui");
-  let isDragging = false;
-  let offsetX, offsetY;
-
-  floatingUI.addEventListener("mousedown", (e) => {
-    //don't drag if clicking on interactive elements
-    if (e.target.closest("button, input, select, details, summary")) return;
-
-    isDragging = true;
-    const rect = floatingUI.getBoundingClientRect();
-    offsetX = e.clientX - rect.left;
-    offsetY = e.clientY - rect.top;
-  });
-
-  floatingUI.addEventListener("mousemove", (e) => {
-    if (e.target.closest("button, input, select, details, summary")) {
-      floatingUI.style.cursor = "default";
-    } else {
-      floatingUI.style.cursor = "move";
-    }
-  });
-
-  document.addEventListener("mousemove", (e) => {
-    if (isDragging) {
-      e.preventDefault();
-
-      floatingUI.style.left = e.clientX - offsetX + "px";
-      floatingUI.style.top = e.clientY - offsetY + "px";
-      floatingUI.style.right = "auto";
-    }
-  });
-
-  document.addEventListener("mouseup", () => {
-    isDragging = false;
-  });
+  const floatingUI = new FloatingUI("floating-ui");
 
   // BUTTONS
   // play/pause button

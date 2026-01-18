@@ -298,4 +298,66 @@ class TwoHandleSlider {
   }
 }
 
-export { CircularSlider, TwoHandleSlider };
+class FloatingUI {
+  constructor(elementId) {
+    this.element = document.getElementById(elementId);
+    this.isDragging = false;
+    this.offsetX = 0;
+    this.offsetY = 0;
+    this.init();
+  }
+
+  init() {
+    this.element.addEventListener("mousedown", (e) => this.startDrag(e));
+    this.element.addEventListener("touchstart", (e) => this.startDrag(e));
+    this.element.addEventListener("mousemove", (e) => this.updateCursor(e));
+
+    document.addEventListener("mousemove", (e) => this.drag(e));
+    document.addEventListener("touchmove", (e) => this.drag(e), { passive: false });
+
+    document.addEventListener("mouseup", () => this.endDrag());
+    document.addEventListener("touchend", () => this.endDrag());
+  }
+
+  getClientCoords(e) {
+    if (e.touches && e.touches.length > 0) {
+      return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
+    }
+    return { clientX: e.clientX, clientY: e.clientY };
+  }
+
+  startDrag(e) {
+    // don't drag if clicking on interactive elements
+    if (e.target.closest("button, input, select, details, summary")) return;
+
+    this.isDragging = true;
+    const rect = this.element.getBoundingClientRect();
+    const coords = this.getClientCoords(e);
+    this.offsetX = coords.clientX - rect.left;
+    this.offsetY = coords.clientY - rect.top;
+  }
+
+  updateCursor(e) {
+    if (e.target.closest("button, input, select, details, summary")) {
+      this.element.style.cursor = "default";
+    } else {
+      this.element.style.cursor = "move";
+    }
+  }
+
+  drag(e) {
+    if (this.isDragging) {
+      e.preventDefault();
+      const coords = this.getClientCoords(e);
+      this.element.style.left = coords.clientX - this.offsetX + "px";
+      this.element.style.top = coords.clientY - this.offsetY + "px";
+      this.element.style.right = "auto";
+    }
+  }
+
+  endDrag() {
+    this.isDragging = false;
+  }
+}
+
+export { CircularSlider, TwoHandleSlider, FloatingUI };
