@@ -21,6 +21,7 @@ class CircularSlider {
   }
 
   init() {
+    // mouse events
     this.handle1.addEventListener("mousedown", (e) =>
       this.startDrag(e, "handle1")
     );
@@ -29,6 +30,16 @@ class CircularSlider {
     );
     document.addEventListener("mousemove", (e) => this.drag(e));
     document.addEventListener("mouseup", () => this.endDrag());
+
+    // touch events
+    this.handle1.addEventListener("touchstart", (e) =>
+      this.startDrag(e, "handle1")
+    );
+    this.handle2.addEventListener("touchstart", (e) =>
+      this.startDrag(e, "handle2")
+    );
+    document.addEventListener("touchmove", (e) => this.drag(e));
+    document.addEventListener("touchend", () => this.endDrag());
   }
 
   startDrag(e, handleId) {
@@ -48,9 +59,13 @@ class CircularSlider {
 
     e.preventDefault();
 
+    // get clientX and clientY from either mouse or touch event
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
     const rect = this.container.getBoundingClientRect();
-    const x = e.clientX - rect.left - this.centerX;
-    const y = e.clientY - rect.top - this.centerY;
+    const x = clientX - rect.left - this.centerX;
+    const y = clientY - rect.top - this.centerY;
 
     let angle = (Math.atan2(y, x) * 180) / Math.PI;
     if (angle < 0) angle += 360;
@@ -187,7 +202,7 @@ class TwoHandleSlider {
     this.value2 = max;
 
     this.col1 = "#808080";
-    this.col2 = "#ff9b00";
+    this.col2 = "#ff0000";
 
     this.isDragging = false;
     this.activeHandle = null;
@@ -201,6 +216,7 @@ class TwoHandleSlider {
   }
 
   init() {
+    // mouse events
     this.handle1.addEventListener("mousedown", (e) =>
       this.startDrag(e, "handle1")
     );
@@ -209,6 +225,16 @@ class TwoHandleSlider {
     );
     document.addEventListener("mousemove", (e) => this.drag(e));
     document.addEventListener("mouseup", () => this.endDrag());
+
+    // touch events
+    this.handle1.addEventListener("touchstart", (e) =>
+      this.startDrag(e, "handle1")
+    );
+    this.handle2.addEventListener("touchstart", (e) =>
+      this.startDrag(e, "handle2")
+    );
+    document.addEventListener("touchmove", (e) => this.drag(e));
+    document.addEventListener("touchend", () => this.endDrag());
   }
 
   startDrag(e, handleId) {
@@ -222,7 +248,10 @@ class TwoHandleSlider {
     if (!this.isDragging || !this.activeHandle) return;
 
     const rect = this.container.getBoundingClientRect();
-    let percent = (e.clientX - rect.left) / rect.width;
+
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+
+    let percent = (clientX - rect.left) / rect.width;
     percent = Math.min(Math.max(percent, 0), 1);
     const value = this.min + percent * (this.max - this.min);
 
