@@ -561,11 +561,11 @@ async function load3DTexture(filename, x_size, y_size, z_size) {
   }
 
   const arrayBuffer = await response.arrayBuffer();
-  const data = new Float32Array(arrayBuffer);
+  const data = new Uint8Array(arrayBuffer);
 
   const texture = new THREE.Data3DTexture(data, x_size, y_size, z_size);
   texture.format = THREE.RGBAFormat;
-  texture.type = THREE.FloatType;
+  texture.type = THREE.UnsignedByteType;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;

@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from collections import defaultdict
-from script import interpolate_preprocess, grid_interpolate, Lab_to_sRGB
+from data_meshes_script import interpolate_preprocess, grid_interpolate, Lab_to_sRGB
 import struct
 
 # extends data by duplicating max chroma points outward to fill chroma space, up to the max of 38
@@ -138,14 +138,17 @@ def debug_textures(size=64):
     print("Created debug textures")    
 
 def write_texture(texture, output_path):
+    # normalize to uint8 
+    normalized = (texture * 255).astype(np.uint8)
+    
     with open(output_path, 'wb') as f:
-        texture.tofile(f)
+        normalized.tofile(f)
     
     print(f"wrote to {output_path}")
 
 if __name__ == "__main__":
-    df = pd.read_csv("munsell_parsed.csv", index_col=False)
+    df = pd.read_csv("./assets/munsell_parsed.csv", index_col=False)
     texture = to_3d_texture(df)
-    write_texture(texture, "munsell_texture.raw")
+    write_texture(texture, "./assets/munsell_texture.raw")
     
     
