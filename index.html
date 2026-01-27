@@ -1,220 +1,10 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
     <title>The Munsell color Space</title>
-    <style>
-      * {
-        box-sizing: border-box;
-      }
-
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: sans-serif;
-      }
-
-      /* Top half with 3D content */
-      #top-half {
-        position: relative;
-        height: 80vh;
-        width: 100%;
-        background: black;
-        overflow: hidden;
-      }
-
-      #render-container {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 0;
-      }
-
-      #floating-ui {
-        position: absolute;
-        top: 10%;
-        right: 5%;
-        width: 300px;
-        background: rgba(30, 30, 30, 0.9);
-        color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
-        z-index: 1;
-      }
-
-      .swatch {
-        height: 40px;
-        background: hotpink;
-        border-radius: 5px;
-        margin-bottom: 1rem;
-      }
-
-      .label {
-        font-size: 0.85rem;
-        margin-bottom: 0.25rem;
-      }
-
-      button,
-      input[type="range"] {
-        width: 100%;
-        margin-bottom: 0.75rem;
-      }
-
-      .scene-dropdown {
-        margin-bottom: 10px;
-      }
-
-      /* hue slider */
-      .circular-slider {
-        position: relative;
-        width: 200px;
-        height: 200px;
-        margin: 10px 0;
-      }
-
-      .slider-track {
-        width: 100%;
-        height: 100%;
-        border-radius: 50%;
-        position: relative;
-        background: conic-gradient(
-          from 90deg,
-          /* 10RP, 10R, 10YR,...*/ rgb(219, 0, 86),
-          rgb(230, 58, 0),
-          rgb(255, 185, 0),
-          rgb(216, 209, 0),
-          rgb(0, 243, 0),
-          rgb(0, 162, 112),
-          rgb(0, 182, 211),
-          rgb(0, 140, 244),
-          rgba(114, 0, 216),
-          rgb(224, 0, 202),
-          rgb(219, 0, 86)
-        );
-      }
-
-      .slider-track::after {
-        content: "";
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        right: 20px;
-        bottom: 20px;
-        background: #333;
-        border-radius: 50%;
-      }
-
-      .handle {
-        position: absolute;
-        width: 20px;
-        height: 20px;
-        background: white;
-        border: 3px solid #333;
-        border-radius: 50%;
-        cursor: pointer;
-        transform: translate(-50%, -50%);
-        z-index: 10;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-      }
-
-      .handle:hover {
-        transform: translate(-50%, -50%) scale(1.1);
-      }
-
-      .handle.active {
-        background: #aaa;
-        transform: translate(-50%, -50%) scale(1.2);
-      }
-
-      .arc-indicator {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        border-radius: 50%;
-        pointer-events: none;
-      }
-
-      .arc-svg {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-      }
-
-      .arc-fill::after {
-        content: "";
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        right: 20px;
-        bottom: 20px;
-        background: #333;
-        border-radius: 50%;
-      }
-
-      /* Value/chroma sliders */
-      .two-handle-slider {
-        position: relative;
-        width: 200px;
-        height: 20px;
-      }
-
-      .track {
-        position: absolute;
-        width: 100%;
-        height: 6px;
-        top: 7px;
-        border-radius: 3px;
-        background: linear-gradient(to right, black, white);
-      }
-
-      .handle {
-        position: absolute;
-        width: 12px;
-        height: 12px;
-        top: 4px;
-        background: white;
-        border: 1px solid #666;
-        border-radius: 50%;
-        cursor: pointer;
-      }
-
-      .handle.active {
-        background: #ccc;
-      }
-
-      #bottom-half {
-        min-height: 50vh;
-        background: #f0f0f0;
-        margin: 0;
-        overflow: auto;
-      }
-
-      #body {
-        padding-left: 4rem;
-        padding-right: 4rem;
-        margin: 0 auto;
-        overflow: auto;
-        max-width: 1300px;
-      }
-
-      h1,
-      h2 {
-        color: #333;
-      }
-
-      h1 + p,
-      h2 + p {
-        margin-top: 0.25rem;
-      }
-    </style>
     <script type="importmap">
       {
         "imports": {
@@ -230,9 +20,6 @@
     <div id="top-half">
       <div id="render-container"></div>
       <div id="floating-ui">
-        <!-- idk if I want to have a swatch or not prob gonna remove it -->
-        <!-- <div class="swatch" id="color-preview"></div> -->
-
         <!-- buttons -->
         <button id="toggle-rotation">Pause Rotation</button>
 
@@ -323,8 +110,9 @@
       <div id="body">
         <h1>Munsell Color Space Explorer</h1>
 
-        <p>Drag to pan the camera! Play with the sliders to explore! 
-          Scroll down for fun facts.
+        <p>
+          Drag to pan the camera! Play with the sliders to explore! Scroll down
+          for fun facts.
         </p>
 
         <h2>Quick Definitions</h2>
